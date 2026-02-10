@@ -118,12 +118,12 @@ RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
 RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
       echo "Downloading spatial upscaler..." && \
       wget --progress=dot:giga \
-        -O models/checkpoints/ltx-2-spatial-upsampler-x2-1.0.safetensors \
-        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upsampler-x2-1.0.safetensors && \
+        -O models/checkpoints/ltx-2-spatial-upscaler-x2-1.0.safetensors \
+        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors && \
       echo "Downloading temporal upscaler..." && \
       wget --progress=dot:giga \
-        -O models/checkpoints/ltx-2-temporal-upsampler-x2-1.0.safetensors \
-        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-temporal-upsampler-x2-1.0.safetensors; \
+        -O models/checkpoints/ltx-2-temporal-upscaler-x2-1.0.safetensors \
+        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-temporal-upscaler-x2-1.0.safetensors; \
     fi
 
 # Distilled LoRA (para two-stage pipeline)
