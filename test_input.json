@@ -1,0 +1,57 @@
+{
+  "input": {
+    "workflow": {
+      "1": {
+        "class_type": "LTXVLoraModelLoader",
+        "inputs": {
+          "model_name": "ltx-2-19b-dev-fp8.safetensors",
+          "lora_names": ""
+        }
+      },
+      "2": {
+        "class_type": "LTXVTextEncoderLoader",
+        "inputs": {
+          "model_name": "gemma-3-12b-it-qat-q4_0-unquantized"
+        }
+      },
+      "3": {
+        "class_type": "LTXVConditioning",
+        "inputs": {
+          "prompt": "A cinematic shot of a golden retriever running through a sunflower field at sunset, slow motion, 4K quality",
+          "negative_prompt": "blurry, low quality, distorted",
+          "model": ["1", 0],
+          "text_encoder": ["2", 0]
+        }
+      },
+      "4": {
+        "class_type": "LTXVSampler",
+        "inputs": {
+          "seed": 42,
+          "steps": 30,
+          "cfg": 3.5,
+          "num_frames": 97,
+          "width": 768,
+          "height": 512,
+          "model": ["1", 0],
+          "conditioning": ["3", 0]
+        }
+      },
+      "5": {
+        "class_type": "LTXVDecode",
+        "inputs": {
+          "latents": ["4", 0],
+          "model": ["1", 0]
+        }
+      },
+      "6": {
+        "class_type": "VHS_VideoCombine",
+        "inputs": {
+          "images": ["5", 0],
+          "frame_rate": 24,
+          "format": "video/h264-mp4",
+          "filename_prefix": "ltx_video"
+        }
+      }
+    }
+  }
+}
