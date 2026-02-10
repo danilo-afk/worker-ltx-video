@@ -95,15 +95,13 @@ CMD ["/start.sh"]
 # Stage 2: Download models
 FROM base AS downloader
 
-ARG HUGGINGFACE_ACCESS_TOKEN
 ARG MODEL_TYPE=ltx-video
 
 WORKDIR /comfyui
 
 # Create necessary directories
 RUN mkdir -p models/checkpoints models/vae models/unet models/clip \
-    models/text_encoders models/diffusion_models models/loras \
-    models/LLM/gemma-3-12b-it-qat-q4_0-unquantized
+    models/text_encoders models/diffusion_models models/loras
 
 # ============ LTX-Video Models ============
 # Checkpoint principal (FP8 - ~19GB, requer menos VRAM)
@@ -134,37 +132,14 @@ RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
         https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors; \
     fi
 
-# Text Encoder: Gemma 3 12B (QAT Q4_0 unquantized) - 5 shards, ~24.4GB total
-# Requer aceitar licença do Google no HuggingFace + token
+# Text Encoder: Gemma 3 12B FP8 (arquivo único, público, sem auth)
+# Repo: GitMylo/LTX-2-comfy_gemma_fp8_e4m3fn (~13GB)
 RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
-      echo "Downloading Gemma 3 12B text encoder configs..." && \
-      cd models/LLM/gemma-3-12b-it-qat-q4_0-unquantized && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/config.json && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/tokenizer.json && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/tokenizer.model && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/tokenizer_config.json && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/special_tokens_map.json && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/generation_config.json && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model.safetensors.index.json && \
-      echo "Downloading Gemma 3 model shards (5 of 5)..." && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00001-of-00005.safetensors && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00002-of-00005.safetensors && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00003-of-00005.safetensors && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00004-of-00005.safetensors && \
-      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
-        https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00005-of-00005.safetensors && \
-      echo "Gemma 3 text encoder downloaded successfully!"; \
+      echo "Downloading Gemma 3 12B FP8 text encoder (~13GB)..." && \
+      wget --progress=dot:giga \
+        -O models/text_encoders/gemma_3_12B_it_fp8_e4m3fn.safetensors \
+        https://huggingface.co/GitMylo/LTX-2-comfy_gemma_fp8_e4m3fn/resolve/main/gemma_3_12B_it_fp8_e4m3fn.safetensors && \
+      echo "Gemma 3 FP8 text encoder downloaded successfully!"; \
     fi
 # ==========================================
 
