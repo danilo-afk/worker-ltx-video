@@ -135,33 +135,34 @@ RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
     fi
 
 # Text Encoder: Gemma 3 12B (QAT Q4_0 unquantized) - 5 shards, ~24.4GB total
+# Requer aceitar licença do Google no HuggingFace + token
 RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
       echo "Downloading Gemma 3 12B text encoder configs..." && \
       cd models/LLM/gemma-3-12b-it-qat-q4_0-unquantized && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/config.json && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/tokenizer.json && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/tokenizer.model && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/tokenizer_config.json && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/special_tokens_map.json && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/generation_config.json && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model.safetensors.index.json && \
       echo "Downloading Gemma 3 model shards (5 of 5)..." && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00001-of-00005.safetensors && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00002-of-00005.safetensors && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00003-of-00005.safetensors && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00004-of-00005.safetensors && \
-      wget --progress=dot:giga \
+      wget --progress=dot:giga --header="Authorization: Bearer ${HUGGINGFACE_ACCESS_TOKEN}" \
         https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00005-of-00005.safetensors && \
       echo "Gemma 3 text encoder downloaded successfully!"; \
     fi
