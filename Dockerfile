@@ -88,6 +88,12 @@ RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/Lightricks/ComfyUI-LTXVideo.git && \
     cd ComfyUI-LTXVideo && \
     uv pip install --no-cache-dir -r requirements.txt
+
+# VideoHelperSuite (VHS) - necessário para output de vídeo (VHS_VideoCombine)
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git && \
+    cd ComfyUI-VideoHelperSuite && \
+    uv pip install --no-cache-dir -r requirements.txt
 # ==========================================
 
 CMD ["/start.sh"]
