@@ -110,43 +110,18 @@ RUN mkdir -p models/checkpoints models/vae models/unet models/clip \
     models/text_encoders models/diffusion_models models/loras
 
 # ============ LTX-Video Models ============
-# Checkpoint principal (FP8 - ~19GB, requer menos VRAM)
+# Checkpoint + Text Encoder em um único RUN (minimizar layers e tempo)
 RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
-      echo "Downloading LTX-2 checkpoint (FP8)..." && \
+      echo "=== Downloading LTX-2 checkpoint FP8 ===" && \
       wget --progress=dot:giga \
         -O models/checkpoints/ltx-2-19b-dev-fp8.safetensors \
-        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors; \
-    fi
-
-# Upscalers (spatial + temporal)
-RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
-      echo "Downloading spatial upscaler..." && \
-      wget --progress=dot:giga \
-        -O models/checkpoints/ltx-2-spatial-upscaler-x2-1.0.safetensors \
-        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors && \
-      echo "Downloading temporal upscaler..." && \
-      wget --progress=dot:giga \
-        -O models/checkpoints/ltx-2-temporal-upscaler-x2-1.0.safetensors \
-        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-temporal-upscaler-x2-1.0.safetensors; \
-    fi
-
-# Distilled LoRA (para two-stage pipeline)
-RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
-      echo "Downloading distilled LoRA..." && \
-      wget --progress=dot:giga \
-        -O models/loras/ltx-2-19b-distilled-lora-384.safetensors \
-        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors; \
-    fi
-
-# Text Encoder: Gemma 3 12B FP8 + tokenizer (requer diretório completo)
-# O LTXVGemmaCLIPModelLoader busca tokenizer.model e model*.safetensors
-RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
+        https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors && \
+      echo "=== Downloading Gemma 3 FP8 text encoder ===" && \
       mkdir -p models/text_encoders/gemma-3-fp8 && \
-      echo "Downloading Gemma 3 12B FP8 text encoder (~13GB)..." && \
       wget --progress=dot:giga \
         -O models/text_encoders/gemma-3-fp8/model.safetensors \
         https://huggingface.co/GitMylo/LTX-2-comfy_gemma_fp8_e4m3fn/resolve/main/gemma_3_12B_it_fp8_e4m3fn.safetensors && \
-      echo "Downloading Gemma 3 tokenizer files..." && \
+      echo "=== Downloading tokenizer ===" && \
       wget -q -O models/text_encoders/gemma-3-fp8/tokenizer.model \
         https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/tokenizer.model && \
       wget -q -O models/text_encoders/gemma-3-fp8/tokenizer_config.json \
@@ -155,7 +130,7 @@ RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
         https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/tokenizer.json && \
       wget -q -O models/text_encoders/gemma-3-fp8/special_tokens_map.json \
         https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/special_tokens_map.json && \
-      echo "Gemma 3 FP8 text encoder + tokenizer downloaded!"; \
+      echo "=== All models downloaded! ==="; \
     fi
 # ==========================================
 
