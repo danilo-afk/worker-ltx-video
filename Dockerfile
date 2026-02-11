@@ -138,14 +138,24 @@ RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
         https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors; \
     fi
 
-# Text Encoder: Gemma 3 12B FP8 (arquivo único, público, sem auth)
-# Repo: GitMylo/LTX-2-comfy_gemma_fp8_e4m3fn (~13GB)
+# Text Encoder: Gemma 3 12B FP8 + tokenizer (requer diretório completo)
+# O LTXVGemmaCLIPModelLoader busca tokenizer.model e model*.safetensors
 RUN if [ "$MODEL_TYPE" = "ltx-video" ]; then \
+      mkdir -p models/text_encoders/gemma-3-fp8 && \
       echo "Downloading Gemma 3 12B FP8 text encoder (~13GB)..." && \
       wget --progress=dot:giga \
-        -O models/text_encoders/gemma_3_12B_it_fp8_e4m3fn.safetensors \
+        -O models/text_encoders/gemma-3-fp8/model.safetensors \
         https://huggingface.co/GitMylo/LTX-2-comfy_gemma_fp8_e4m3fn/resolve/main/gemma_3_12B_it_fp8_e4m3fn.safetensors && \
-      echo "Gemma 3 FP8 text encoder downloaded successfully!"; \
+      echo "Downloading Gemma 3 tokenizer files..." && \
+      wget -q -O models/text_encoders/gemma-3-fp8/tokenizer.model \
+        https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/tokenizer.model && \
+      wget -q -O models/text_encoders/gemma-3-fp8/tokenizer_config.json \
+        https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/tokenizer_config.json && \
+      wget -q -O models/text_encoders/gemma-3-fp8/tokenizer.json \
+        https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/tokenizer.json && \
+      wget -q -O models/text_encoders/gemma-3-fp8/special_tokens_map.json \
+        https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/special_tokens_map.json && \
+      echo "Gemma 3 FP8 text encoder + tokenizer downloaded!"; \
     fi
 # ==========================================
 
