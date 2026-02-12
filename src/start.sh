@@ -46,6 +46,14 @@ if [ -d "$VOLUME" ]; then
       "https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/special_tokens_map.json"
   fi
 
+  # preprocessor_config.json (exigido pelo LTXVGemmaCLIPModelLoader)
+  if [ ! -f "$GEMMA_DIR/preprocessor_config.json" ]; then
+    cat > "$GEMMA_DIR/preprocessor_config.json" << 'PPEOF'
+{"do_convert_rgb":true,"do_normalize":true,"do_pan_and_scan":false,"do_rescale":true,"do_resize":true,"image_mean":[0.5,0.5,0.5],"image_processor_type":"Gemma3ImageProcessor","image_seq_length":256,"image_std":[0.5,0.5,0.5],"processor_class":"Gemma3Processor","resample":2,"rescale_factor":0.00392156862745098,"size":{"height":896,"width":896}}
+PPEOF
+    echo "worker-ltx-video: preprocessor_config.json criado"
+  fi
+
   echo "worker-ltx-video: Modelos prontos no volume!"
 else
   echo "worker-ltx-video: Sem network volume, usando modelos do container"
