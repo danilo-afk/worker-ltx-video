@@ -17,7 +17,27 @@ if [ -d "$VOLUME" ]; then
   GEMMA_MODEL="$GEMMA_DIR/model.safetensors"
   TOKENIZER="$GEMMA_DIR/tokenizer.model"
 
-  if [ ! -f "$CKPT" ]; then
+  # Tamanhos mínimos esperados (bytes) - detecta downloads incompletos
+  CKPT_MIN=10000000000    # ~10GB
+  GEMMA_MIN=11000000000   # ~11GB
+
+  check_size() {
+    local file="$1" min="$2"
+    if [ -f "$file" ]; then
+      local size
+      size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+      if [ "$size" -lt "$min" ]; then
+        echo "worker-ltx-video: $file corrompido (${size} bytes < ${min}), re-baixando..."
+        rm -f "$file"
+        return 1
+      fi
+    else
+      return 1
+    fi
+    return 0
+  }
+
+  if ! check_size "$CKPT" "$CKPT_MIN"; then
     echo "worker-ltx-video: Baixando LTX-2 checkpoint FP8..."
     mkdir -p "$VOLUME/models/checkpoints"
     wget --progress=dot:giga \
@@ -25,7 +45,7 @@ if [ -d "$VOLUME" ]; then
       "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors"
   fi
 
-  if [ ! -f "$GEMMA_MODEL" ]; then
+  if ! check_size "$GEMMA_MODEL" "$GEMMA_MIN"; then
     echo "worker-ltx-video: Baixando Gemma 3 FP8 text encoder..."
     mkdir -p "$GEMMA_DIR"
     wget --progress=dot:giga \
