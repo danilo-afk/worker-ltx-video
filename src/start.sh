@@ -18,8 +18,8 @@ if [ -d "$VOLUME" ]; then
   TOKENIZER="$GEMMA_DIR/tokenizer.model"
 
   # Tamanhos mínimos esperados (bytes) - detecta downloads incompletos
-  CKPT_MIN=10000000000    # ~10GB
-  GEMMA_MIN=11000000000   # ~11GB
+  CKPT_MIN=27000000000    # checkpoint real: 27GB
+  GEMMA_MIN=13200000000   # gemma real: 13.2GB
 
   check_size() {
     local file="$1" min="$2"
