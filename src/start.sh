@@ -74,6 +74,16 @@ if [ -d "$VOLUME" ]; then
       "https://huggingface.co/jscheah/gemma3-tokenizer/resolve/main/special_tokens_map.json"
   fi
 
+  # config.json e generation_config.json (exigidos por Gemma3ForConditionalGeneration.from_pretrained)
+  if [ ! -f "$GEMMA_DIR/config.json" ]; then
+    echo "worker-ltx-video: Baixando config.json do text_encoder..."
+    wget -q -O "$GEMMA_DIR/config.json" \
+      "https://huggingface.co/Lightricks/LTX-2/resolve/main/text_encoder/config.json"
+    wget -q -O "$GEMMA_DIR/generation_config.json" \
+      "https://huggingface.co/Lightricks/LTX-2/resolve/main/text_encoder/generation_config.json"
+    echo "worker-ltx-video: config.json criado"
+  fi
+
   # preprocessor_config.json (exigido pelo LTXVGemmaCLIPModelLoader)
   if [ ! -f "$GEMMA_DIR/preprocessor_config.json" ]; then
     cat > "$GEMMA_DIR/preprocessor_config.json" << 'PPEOF'
