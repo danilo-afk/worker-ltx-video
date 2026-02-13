@@ -19,7 +19,7 @@ if [ -d "$VOLUME" ]; then
 
   # Tamanhos mínimos esperados (bytes) - detecta downloads incompletos
   CKPT_MIN=27000000000    # checkpoint real: 27GB
-  GEMMA_MIN=13200000000   # gemma real: 13.2GB
+  GEMMA_MIN=13000000000   # gemma ~13GB
 
   check_size() {
     local file="$1" min="$2"
@@ -45,12 +45,20 @@ if [ -d "$VOLUME" ]; then
       "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors"
   fi
 
+  # Marker para forçar re-download quando fonte muda
+  GEMMA_MARKER="$GEMMA_DIR/.source-comfy-org-fp8-scaled"
+  if [ ! -f "$GEMMA_MARKER" ] && [ -f "$GEMMA_MODEL" ]; then
+    echo "worker-ltx-video: Modelo Gemma antigo (GitMylo) detectado, trocando para Comfy-Org oficial..."
+    rm -f "$GEMMA_MODEL"
+  fi
+
   if ! check_size "$GEMMA_MODEL" "$GEMMA_MIN"; then
-    echo "worker-ltx-video: Baixando Gemma 3 FP8 text encoder..."
+    echo "worker-ltx-video: Baixando Gemma 3 FP8 Scaled (Comfy-Org oficial)..."
     mkdir -p "$GEMMA_DIR"
     wget --progress=dot:giga \
       -O "$GEMMA_MODEL" \
-      "https://huggingface.co/GitMylo/LTX-2-comfy_gemma_fp8_e4m3fn/resolve/main/gemma_3_12B_it_fp8_e4m3fn.safetensors"
+      "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors"
+    touch "$GEMMA_MARKER"
   fi
 
   if [ ! -f "$TOKENIZER" ]; then
