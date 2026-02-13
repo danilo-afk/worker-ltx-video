@@ -102,13 +102,15 @@ echo "worker-ltx-video: Starting ComfyUI"
 
 : "${COMFY_LOG_LEVEL:=DEBUG}"
 
+COMFY_VRAM="--lowvram"
+
 if [ "$SERVE_API_LOCALLY" == "true" ]; then
-    python -u /comfyui/main.py --disable-auto-launch --disable-metadata --listen --verbose "${COMFY_LOG_LEVEL}" --log-stdout &
+    python -u /comfyui/main.py --disable-auto-launch --disable-metadata --listen ${COMFY_VRAM} --verbose "${COMFY_LOG_LEVEL}" --log-stdout &
 
     echo "worker-ltx-video: Starting RunPod Handler"
     python -u /handler.py --rp_serve_api --rp_api_host=0.0.0.0
 else
-    python -u /comfyui/main.py --disable-auto-launch --disable-metadata --verbose "${COMFY_LOG_LEVEL}" --log-stdout &
+    python -u /comfyui/main.py --disable-auto-launch --disable-metadata ${COMFY_VRAM} --verbose "${COMFY_LOG_LEVEL}" --log-stdout &
 
     echo "worker-ltx-video: Starting RunPod Handler"
     python -u /handler.py
