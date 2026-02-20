@@ -92,6 +92,26 @@ PPEOF
     echo "worker-ltx-video: preprocessor_config.json criado"
   fi
 
+  # Distilled LoRA (melhora qualidade com modelo dev)
+  LORA="$VOLUME/models/loras/ltx-2-19b-distilled-lora-384.safetensors"
+  if [ ! -f "$LORA" ]; then
+    echo "worker-ltx-video: Baixando Distilled LoRA..."
+    mkdir -p "$VOLUME/models/loras"
+    wget --progress=dot:giga \
+      -O "$LORA" \
+      "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
+  fi
+
+  # Spatial Upscaler 2x (para pipeline de 2 estágios)
+  UPSCALER="$VOLUME/models/upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+  if [ ! -f "$UPSCALER" ]; then
+    echo "worker-ltx-video: Baixando Spatial Upscaler 2x..."
+    mkdir -p "$VOLUME/models/upscale_models"
+    wget --progress=dot:giga \
+      -O "$UPSCALER" \
+      "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+  fi
+
   echo "worker-ltx-video: Modelos prontos no volume!"
 else
   echo "worker-ltx-video: Sem network volume, usando modelos do container"

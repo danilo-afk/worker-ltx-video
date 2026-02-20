@@ -89,11 +89,23 @@ RUN cd /comfyui/custom_nodes && \
     cd ComfyUI-LTXVideo && \
     uv pip install --no-cache-dir -r requirements.txt
 
-# VideoHelperSuite (VHS) - necessário para output de vídeo (VHS_VideoCombine)
+# VideoHelperSuite (VHS) - output de vídeo (VHS_VideoCombine)
 RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git && \
     cd ComfyUI-VideoHelperSuite && \
     uv pip install --no-cache-dir -r requirements.txt
+
+# RES4LYF - sampler avançado res_2s (usado no workflow oficial LTX-2)
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/ClownsharkBatwing/RES4LYF.git && \
+    cd RES4LYF && \
+    uv pip install --no-cache-dir -r requirements.txt
+
+# ComfyUI-Impact-Pack - ImpactExecutionOrderController
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/ltdrdata/ComfyUI-Impact-Pack.git && \
+    cd ComfyUI-Impact-Pack && \
+    python install.py
 # ==========================================
 
 CMD ["/start.sh"]
