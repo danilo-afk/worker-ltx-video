@@ -36,6 +36,87 @@ COMFY_HOST = "127.0.0.1:8188"
 REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
 
 
+def _safe_dict_keys(value):
+    if isinstance(value, dict):
+        return sorted(list(value.keys()))
+    return []
+
+
+def _extract_loadimage_nodes(workflow):
+    """Retorna lista de nós LoadImage com nome esperado do arquivo."""
+    load_nodes = []
+    if not isinstance(workflow, dict):
+        return load_nodes
+
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = node.get("class_type")
+        if class_type != "LoadImage":
+            continue
+        inputs = node.get("inputs", {})
+        expected_image = inputs.get("image") if isinstance(inputs, dict) else None
+        load_nodes.append({"node_id": str(node_id), "expected_image": expected_image})
+
+    return load_nodes
+
+
+def _log_job_diagnostics(job_id, job_input, workflow, input_images):
+    """Logs curtos para diagnosticar se I2V recebeu imagens corretamente."""
+    input_keys = _safe_dict_keys(job_input)
+    image_count = len(input_images) if isinstance(input_images, list) else 0
+    image_names = []
+    image_payload_sizes = []
+
+    if isinstance(input_images, list):
+        for image in input_images:
+            if not isinstance(image, dict):
+                continue
+            name = image.get("name")
+            payload = image.get("image")
+            if isinstance(name, str):
+                image_names.append(name)
+            if isinstance(payload, str):
+                image_payload_sizes.append(len(payload))
+
+    load_nodes = _extract_loadimage_nodes(workflow)
+    expected_names = [
+        item.get("expected_image")
+        for item in load_nodes
+        if isinstance(item.get("expected_image"), str)
+    ]
+
+    print(
+        "worker-ltx-video - Job input summary:",
+        json.dumps(
+            {
+                "job_id": job_id,
+                "input_keys": input_keys,
+                "workflow_node_count": len(workflow) if isinstance(workflow, dict) else 0,
+                "load_image_nodes": load_nodes,
+                "images_count": image_count,
+                "image_names": image_names,
+                "image_payload_sizes": image_payload_sizes,
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    if load_nodes and image_count == 0:
+        print(
+            "worker-ltx-video - WARNING: Workflow possui LoadImage, mas input.images veio vazio/ausente."
+        )
+
+    if expected_names and image_names:
+        missing = [name for name in expected_names if name not in image_names]
+        extra = [name for name in image_names if name not in expected_names]
+        if missing or extra:
+            print(
+                "worker-ltx-video - WARNING: Nomes de imagem não batem com LoadImage:",
+                json.dumps({"expected": expected_names, "received": image_names, "missing": missing, "extra": extra}),
+            )
+
+
 def _comfy_server_status():
     """Verifica se o servidor ComfyUI HTTP está acessível."""
     try:
@@ -273,6 +354,7 @@ def handler(job):
 
     workflow = validated_data["workflow"]
     input_images = validated_data.get("images")
+    _log_job_diagnostics(job_id, job_input, workflow, input_images)
 
     if not check_server(
         f"http://{COMFY_HOST}/",
