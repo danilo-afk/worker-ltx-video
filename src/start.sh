@@ -116,12 +116,28 @@ PY
     return 0
   }
 
+  download_with_validation() {
+    local file="$1" min="$2" url="$3" label="$4"
+    local max_attempts=3
+    local attempt=1
+    while [ "$attempt" -le "$max_attempts" ]; do
+      echo "worker-ltx-video: Baixando ${label} (tentativa ${attempt}/${max_attempts})..."
+      mkdir -p "$(dirname "$file")"
+      rm -f "$file"
+      if wget --progress=dot:giga -O "$file" "$url" && check_size "$file" "$min"; then
+        return 0
+      fi
+      echo "worker-ltx-video: Falha ao validar ${label} na tentativa ${attempt}" >&2
+      attempt=$((attempt + 1))
+    done
+    echo "worker-ltx-video: ERRO ao baixar ${label} após ${max_attempts} tentativas." >&2
+    return 1
+  }
+
   if ! check_size "$CKPT" "$CKPT_MIN"; then
-    echo "worker-ltx-video: Baixando checkpoint LTX-2 ($CKPT_NAME)..."
-    mkdir -p "$VOLUME/models/checkpoints"
-    wget --progress=dot:giga \
-      -O "$CKPT" \
-      "$CKPT_URL"
+    if ! download_with_validation "$CKPT" "$CKPT_MIN" "$CKPT_URL" "checkpoint LTX-2 ($CKPT_NAME)"; then
+      exit 1
+    fi
   fi
 
   # Compatibilidade com workflows antigos/oficiais que usam outros nomes de arquivo.
@@ -135,12 +151,11 @@ PY
     rm -f "$GEMMA_MODEL"
   fi
 
+  GEMMA_URL="https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors"
   if ! check_size "$GEMMA_MODEL" "$GEMMA_MIN"; then
-    echo "worker-ltx-video: Baixando Gemma 3 FP8 Scaled (Comfy-Org oficial)..."
-    mkdir -p "$GEMMA_DIR"
-    wget --progress=dot:giga \
-      -O "$GEMMA_MODEL" \
-      "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors"
+    if ! download_with_validation "$GEMMA_MODEL" "$GEMMA_MIN" "$GEMMA_URL" "Gemma 3 FP8 Scaled"; then
+      exit 1
+    fi
     touch "$GEMMA_MARKER"
   fi
 
@@ -177,22 +192,22 @@ PPEOF
 
   # Distilled LoRA (melhora qualidade com modelo dev)
   LORA="$VOLUME/models/loras/ltx-2-19b-distilled-lora-384.safetensors"
-  if [ ! -f "$LORA" ]; then
-    echo "worker-ltx-video: Baixando Distilled LoRA..."
-    mkdir -p "$VOLUME/models/loras"
-    wget --progress=dot:giga \
-      -O "$LORA" \
-      "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
+  LORA_MIN=1000000
+  LORA_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
+  if ! check_size "$LORA" "$LORA_MIN"; then
+    if ! download_with_validation "$LORA" "$LORA_MIN" "$LORA_URL" "Distilled LoRA"; then
+      exit 1
+    fi
   fi
 
   # Spatial Upscaler 2x (para pipeline de 2 estágios)
   UPSCALER="$VOLUME/models/latent_upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
-  if [ ! -f "$UPSCALER" ]; then
-    echo "worker-ltx-video: Baixando Spatial Upscaler 2x..."
-    mkdir -p "$VOLUME/models/latent_upscale_models"
-    wget --progress=dot:giga \
-      -O "$UPSCALER" \
-      "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+  UPSCALER_MIN=1000000
+  UPSCALER_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+  if ! check_size "$UPSCALER" "$UPSCALER_MIN"; then
+    if ! download_with_validation "$UPSCALER" "$UPSCALER_MIN" "$UPSCALER_URL" "Spatial Upscaler 2x"; then
+      exit 1
+    fi
   fi
 
   # Compatibilidade com caminhos legados
