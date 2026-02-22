@@ -12,7 +12,21 @@ VOLUME="/runpod-volume"
 if [ -d "$VOLUME" ]; then
   echo "worker-ltx-video: Network volume detectado em $VOLUME"
 
-  CKPT="$VOLUME/models/checkpoints/ltx-2-19b-dev-fp8.safetensors"
+  # Checkpoint padrão para produção: distilled FP8 (mais estável para I2V no endpoint atual).
+  CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled-fp8.safetensors}"
+  case "$CKPT_NAME" in
+    ltx-2-19b-dev-fp8.safetensors)
+      CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors"
+      ;;
+    ltx-2-19b-distilled-fp8.safetensors)
+      CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-fp8.safetensors"
+      ;;
+    *)
+      echo "worker-ltx-video: LTX_CKPT_NAME inválido: $CKPT_NAME" >&2
+      exit 1
+      ;;
+  esac
+  CKPT="$VOLUME/models/checkpoints/$CKPT_NAME"
   GEMMA_DIR="$VOLUME/models/text_encoders/gemma-3-fp8"
   GEMMA_MODEL="$GEMMA_DIR/model.safetensors"
   TOKENIZER="$GEMMA_DIR/tokenizer.model"
@@ -38,12 +52,16 @@ if [ -d "$VOLUME" ]; then
   }
 
   if ! check_size "$CKPT" "$CKPT_MIN"; then
-    echo "worker-ltx-video: Baixando LTX-2 checkpoint FP8..."
+    echo "worker-ltx-video: Baixando checkpoint LTX-2 ($CKPT_NAME)..."
     mkdir -p "$VOLUME/models/checkpoints"
     wget --progress=dot:giga \
       -O "$CKPT" \
-      "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors"
+      "$CKPT_URL"
   fi
+
+  # Compatibilidade com workflows antigos/oficiais que usam outros nomes de arquivo.
+  ln -sf "$CKPT_NAME" "$VOLUME/models/checkpoints/ltx-2-19b-dev-fp8.safetensors"
+  ln -sf "$CKPT_NAME" "$VOLUME/models/checkpoints/ltx-2-19b-distilled.safetensors"
 
   # Marker para forçar re-download quando fonte muda
   GEMMA_MARKER="$GEMMA_DIR/.source-comfy-org-fp8-scaled"
@@ -103,14 +121,19 @@ PPEOF
   fi
 
   # Spatial Upscaler 2x (para pipeline de 2 estágios)
-  UPSCALER="$VOLUME/models/upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+  UPSCALER="$VOLUME/models/latent_upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
   if [ ! -f "$UPSCALER" ]; then
     echo "worker-ltx-video: Baixando Spatial Upscaler 2x..."
-    mkdir -p "$VOLUME/models/upscale_models"
+    mkdir -p "$VOLUME/models/latent_upscale_models"
     wget --progress=dot:giga \
       -O "$UPSCALER" \
       "https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
   fi
+
+  # Compatibilidade com caminhos legados
+  mkdir -p "$VOLUME/models/upscale_models"
+  ln -sf "../latent_upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors" \
+    "$VOLUME/models/upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
 
   echo "worker-ltx-video: Modelos prontos no volume!"
 else
