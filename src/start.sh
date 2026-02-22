@@ -25,9 +25,13 @@ if [ -d "$VOLUME" ]; then
     echo "worker-ltx-video: flock não encontrado; bootstrap seguirá sem lock" >&2
   fi
 
-  # Checkpoint padrão para produção: distilled FP8 (mais estável para I2V no endpoint atual).
-  CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled-fp8.safetensors}"
+  # Checkpoint padrão: distilled oficial (não-FP8), alinhado ao workflow oficial LTX-2 I2V.
+  CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled.safetensors}"
   case "$CKPT_NAME" in
+    ltx-2-19b-distilled.safetensors)
+      CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled.safetensors"
+      CKPT_MIN=25000000000
+      ;;
     ltx-2-19b-dev-fp8.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors"
       CKPT_MIN=25000000000
@@ -191,6 +195,7 @@ PY
   # Compatibilidade com workflows antigos/oficiais que usam outros nomes de arquivo.
   ln -sf "$CKPT_NAME" "$VOLUME/models/checkpoints/ltx-2-19b-dev-fp8.safetensors"
   ln -sf "$CKPT_NAME" "$VOLUME/models/checkpoints/ltx-2-19b-distilled.safetensors"
+  ln -sf "$CKPT_NAME" "$VOLUME/models/checkpoints/ltx-2-19b-distilled-fp8.safetensors"
 
   # Marker para forçar re-download quando fonte muda
   GEMMA_MARKER="$GEMMA_DIR/.source-comfy-org-fp8-scaled"
