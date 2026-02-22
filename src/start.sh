@@ -12,6 +12,19 @@ VOLUME="/runpod-volume"
 if [ -d "$VOLUME" ]; then
   echo "worker-ltx-video: Network volume detectado em $VOLUME"
 
+  # Evita corrida entre múltiplos workers escrevendo os mesmos modelos no volume.
+  LOCK_FILE="$VOLUME/.model-bootstrap.lock"
+  if command -v flock >/dev/null 2>&1; then
+    exec 9>"$LOCK_FILE"
+    if ! flock -w 1800 9; then
+      echo "worker-ltx-video: timeout aguardando lock de bootstrap ($LOCK_FILE)" >&2
+      exit 1
+    fi
+    echo "worker-ltx-video: lock de bootstrap adquirido"
+  else
+    echo "worker-ltx-video: flock não encontrado; bootstrap seguirá sem lock" >&2
+  fi
+
   # Checkpoint padrão para produção: distilled FP8 (mais estável para I2V no endpoint atual).
   CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled-fp8.safetensors}"
   case "$CKPT_NAME" in
