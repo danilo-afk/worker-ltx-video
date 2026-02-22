@@ -192,6 +192,20 @@ def convert_video_to_mp4(video_bytes, filename):
                 os.remove(p)
 
 
+def upload_binary_artifact(job_id, payload_bytes, filename, default_ext):
+    """Upload de artefato binário e retorna URL pública."""
+    tmp_path = None
+    try:
+        file_ext = os.path.splitext(filename)[1] or default_ext
+        with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
+            tmp.write(payload_bytes)
+            tmp_path = tmp.name
+        return rp_upload.upload_image(job_id, tmp_path)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 def validate_input(job_input):
     """Valida input do job."""
     if job_input is None:
@@ -375,6 +389,7 @@ def handler(job):
     video_data = []
     audio_data = []
     errors = []
+    history_output_summary = []
 
     try:
         ws_url = f"ws://{COMFY_HOST}/ws?clientId={client_id}"
@@ -453,6 +468,11 @@ def handler(job):
         print(f"worker-ltx-video - Processando {len(outputs)} nós de saída...")
 
         for node_id, node_output in outputs.items():
+            if isinstance(node_output, dict):
+                history_output_summary.append(
+                    {"node_id": str(node_id), "keys": sorted(list(node_output.keys()))}
+                )
+
             # Imagens
             if "images" in node_output:
                 for image_info in node_output["images"]:
@@ -482,9 +502,19 @@ def handler(job):
                             b64 = base64.b64encode(image_bytes).decode("utf-8")
                             output_data.append({"filename": filename, "type": "base64", "data": b64})
 
-            # Vídeos (gifs/videos do ComfyUI)
-            if "gifs" in node_output:
-                for vid_info in node_output["gifs"]:
+            # Vídeos (VHS usa "gifs"; SaveVideo pode expor "videos")
+            video_entries = []
+            if isinstance(node_output.get("gifs"), list):
+                video_entries.extend(node_output["gifs"])
+            if isinstance(node_output.get("videos"), list):
+                video_entries.extend(node_output["videos"])
+            if isinstance(node_output.get("video"), list):
+                video_entries.extend(node_output["video"])
+            if isinstance(node_output.get("video"), dict):
+                video_entries.append(node_output["video"])
+
+            if video_entries:
+                for vid_info in video_entries:
                     filename = vid_info.get("filename")
                     subfolder = vid_info.get("subfolder", "")
                     vid_type = vid_info.get("type", "output")
@@ -495,18 +525,11 @@ def handler(job):
                     vid_bytes = get_file_data(filename, subfolder, vid_type)
                     if vid_bytes:
                         vid_bytes, filename = convert_video_to_mp4(vid_bytes, filename)
-                        if os.environ.get("BUCKET_ENDPOINT_URL"):
-                            try:
-                                file_ext = os.path.splitext(filename)[1] or ".mp4"
-                                with tempfile.NamedTemporaryFile(suffix=file_ext, delete=False) as tmp:
-                                    tmp.write(vid_bytes)
-                                    tmp_path = tmp.name
-                                s3_url = rp_upload.upload_image(job_id, tmp_path)
-                                os.remove(tmp_path)
-                                video_data.append({"filename": filename, "type": "s3_url", "data": s3_url})
-                            except Exception as e:
-                                errors.append(f"Erro S3 upload vídeo {filename}: {e}")
-                        else:
+                        try:
+                            uploaded_url = upload_binary_artifact(job_id, vid_bytes, filename, ".mp4")
+                            video_data.append({"filename": filename, "type": "s3_url", "data": uploaded_url})
+                        except Exception as e:
+                            print(f"worker-ltx-video - Upload remoto de vídeo falhou ({filename}): {e}. Fallback base64.")
                             b64 = base64.b64encode(vid_bytes).decode("utf-8")
                             video_data.append({"filename": filename, "type": "base64", "data": b64})
 
@@ -567,7 +590,10 @@ def handler(job):
     if not has_output and errors:
         return {"error": "Job falhou sem output", "details": errors}
     elif not has_output and not errors:
-        final_result["status"] = "success_no_output"
+        return {
+            "error": "Job concluído sem mídia no histórico do ComfyUI",
+            "details": history_output_summary,
+        }
 
     print(f"worker-ltx-video - Job concluído: {len(output_data)} img, {len(video_data)} vid, {len(audio_data)} audio")
     return final_result
