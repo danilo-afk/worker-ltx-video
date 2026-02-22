@@ -11,7 +11,7 @@ VALID_EXTENSIONS = {
 MODEL_DIRS = [
     "checkpoints", "clip", "clip_vision", "controlnet",
     "embeddings", "loras", "upscale_models", "vae", "unet",
-    "text_encoders", "LLM",
+    "text_encoders", "LLM", "latent_upscale_models",
 ]
 
 

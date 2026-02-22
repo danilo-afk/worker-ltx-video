@@ -17,9 +17,11 @@ if [ -d "$VOLUME" ]; then
   case "$CKPT_NAME" in
     ltx-2-19b-dev-fp8.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors"
+      CKPT_MIN=25000000000
       ;;
     ltx-2-19b-distilled-fp8.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-fp8.safetensors"
+      CKPT_MIN=8500000000
       ;;
     *)
       echo "worker-ltx-video: LTX_CKPT_NAME inválido: $CKPT_NAME" >&2
@@ -31,9 +33,9 @@ if [ -d "$VOLUME" ]; then
   GEMMA_MODEL="$GEMMA_DIR/model.safetensors"
   TOKENIZER="$GEMMA_DIR/tokenizer.model"
 
-  # Tamanhos mínimos esperados (bytes) - detecta downloads incompletos
-  CKPT_MIN=27000000000    # checkpoint real: 27GB
-  GEMMA_MIN=13000000000   # gemma ~13GB
+  # Tamanhos mínimos esperados (bytes) - detecta downloads incompletos.
+  # O valor do checkpoint depende do arquivo escolhido (dev vs distilled).
+  GEMMA_MIN=8500000000
 
   check_size() {
     local file="$1" min="$2"
