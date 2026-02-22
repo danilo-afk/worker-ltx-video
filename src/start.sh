@@ -37,6 +37,61 @@ if [ -d "$VOLUME" ]; then
   # O valor do checkpoint depende do arquivo escolhido (dev vs distilled).
   GEMMA_MIN=8500000000
 
+  validate_safetensors_coverage() {
+    local file="$1"
+    python - "$file" <<'PY'
+import json
+import os
+import struct
+import sys
+
+path = sys.argv[1]
+size = os.path.getsize(path)
+if size < 8:
+    raise SystemExit("arquivo menor que 8 bytes")
+
+with open(path, "rb") as f:
+    header_len_raw = f.read(8)
+    if len(header_len_raw) != 8:
+        raise SystemExit("falha ao ler tamanho do header")
+    header_len = struct.unpack("<Q", header_len_raw)[0]
+    if header_len <= 0 or (8 + header_len) > size:
+        raise SystemExit(
+            f"header inválido: header_len={header_len}, file_size={size}"
+        )
+    header_bytes = f.read(header_len)
+    if len(header_bytes) != header_len:
+        raise SystemExit("header incompleto")
+
+try:
+    header = json.loads(header_bytes)
+except Exception as e:
+    raise SystemExit(f"header JSON inválido: {e}")
+
+max_end = 0
+for key, value in header.items():
+    if key == "__metadata__":
+        continue
+    if not isinstance(value, dict):
+        raise SystemExit(f"tensor {key} inválido: entrada não é dict")
+    data_offsets = value.get("data_offsets")
+    if not isinstance(data_offsets, list) or len(data_offsets) != 2:
+        raise SystemExit(f"tensor {key} sem data_offsets válidos")
+    start, end = data_offsets
+    if not isinstance(start, int) or not isinstance(end, int):
+        raise SystemExit(f"tensor {key} offsets não inteiros")
+    if start < 0 or end < start:
+        raise SystemExit(f"tensor {key} offsets inválidos: {start}, {end}")
+    max_end = max(max_end, end)
+
+required_size = 8 + header_len + max_end
+if required_size > size:
+    raise SystemExit(
+        f"arquivo incompleto: required_size={required_size}, file_size={size}"
+    )
+PY
+  }
+
   check_size() {
     local file="$1" min="$2"
     if [ -f "$file" ]; then
@@ -46,6 +101,14 @@ if [ -d "$VOLUME" ]; then
         echo "worker-ltx-video: $file corrompido (${size} bytes < ${min}), re-baixando..."
         rm -f "$file"
         return 1
+      fi
+      if [[ "$file" == *.safetensors ]]; then
+        if ! validate_safetensors_coverage "$file" >/tmp/worker_safetensors_check.log 2>&1; then
+          echo "worker-ltx-video: $file inválido (safetensors), re-baixando..."
+          cat /tmp/worker_safetensors_check.log >&2 || true
+          rm -f "$file"
+          return 1
+        fi
       fi
     else
       return 1
