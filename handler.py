@@ -15,6 +15,7 @@ import socket
 import traceback
 import logging
 import subprocess
+import re
 
 from network_volume import (
     is_network_volume_debug_enabled,
@@ -36,11 +37,72 @@ if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
 COMFY_HOST = "127.0.0.1:8188"
 REFRESH_WORKER = os.environ.get("REFRESH_WORKER", "false").lower() == "true"
 
+OOM_PATTERNS = [
+    re.compile(r"out of memory", re.IGNORECASE),
+    re.compile(r"cuda.*oom", re.IGNORECASE),
+    re.compile(r"cublas_status_alloc_failed", re.IGNORECASE),
+    re.compile(r"memoryerror", re.IGNORECASE),
+    re.compile(r"std::bad_alloc", re.IGNORECASE),
+    re.compile(r"insufficient memory", re.IGNORECASE),
+    re.compile(r"not enough memory", re.IGNORECASE),
+    re.compile(r"killed process", re.IGNORECASE),
+]
+
+GPU_PATTERNS = [
+    re.compile(r"cuda", re.IGNORECASE),
+    re.compile(r"cudnn", re.IGNORECASE),
+    re.compile(r"cublas", re.IGNORECASE),
+    re.compile(r"nvidia", re.IGNORECASE),
+    re.compile(r"device-side assert", re.IGNORECASE),
+    re.compile(r"illegal memory access", re.IGNORECASE),
+    re.compile(r"driver", re.IGNORECASE),
+]
+
 
 def _safe_dict_keys(value):
     if isinstance(value, dict):
         return sorted(list(value.keys()))
     return []
+
+
+def _build_runtime_diagnostics(parts):
+    """
+    Classifica mensagens de erro em categorias úteis para retorno de API.
+    """
+    if parts is None:
+        return None
+
+    if isinstance(parts, str):
+        text_parts = [parts]
+    elif isinstance(parts, (list, tuple)):
+        text_parts = [str(p) for p in parts if p is not None and str(p).strip()]
+    else:
+        text_parts = [str(parts)]
+
+    joined = " | ".join(text_parts).strip()
+    if not joined:
+        return None
+
+    for pattern in OOM_PATTERNS:
+        if pattern.search(joined):
+            return {
+                "category": "GPU_OOM",
+                "matched": pattern.pattern,
+                "message": joined[:1200],
+            }
+
+    for pattern in GPU_PATTERNS:
+        if pattern.search(joined):
+            return {
+                "category": "GPU_RUNTIME",
+                "matched": pattern.pattern,
+                "message": joined[:1200],
+            }
+
+    return {
+        "category": "UNKNOWN",
+        "message": joined[:1200],
+    }
 
 
 def _extract_loadimage_nodes(workflow):
@@ -387,7 +449,10 @@ def handler(job):
 
     validated_data, error_message = validate_input(job_input)
     if error_message:
-        return {"error": error_message}
+        diagnostics = _build_runtime_diagnostics(error_message)
+        if diagnostics and diagnostics.get("category") in {"GPU_OOM", "GPU_RUNTIME"}:
+            print("worker-ltx-video - Runtime diagnostics:", json.dumps(diagnostics))
+        return {"error": error_message, "diagnostics": diagnostics}
 
     workflow = validated_data["workflow"]
     input_images = validated_data.get("images")
@@ -398,12 +463,19 @@ def handler(job):
         COMFY_API_AVAILABLE_MAX_RETRIES,
         COMFY_API_AVAILABLE_INTERVAL_MS,
     ):
-        return {"error": f"ComfyUI ({COMFY_HOST}) inacessível após múltiplas tentativas."}
+        message = f"ComfyUI ({COMFY_HOST}) inacessível após múltiplas tentativas."
+        diagnostics = _build_runtime_diagnostics(message)
+        return {"error": message, "diagnostics": diagnostics}
 
     if input_images:
         upload_result = upload_images(input_images)
         if upload_result["status"] == "error":
-            return {"error": "Falha no upload de imagens", "details": upload_result["details"]}
+            diagnostics = _build_runtime_diagnostics(upload_result.get("details"))
+            return {
+                "error": "Falha no upload de imagens",
+                "details": upload_result["details"],
+                "diagnostics": diagnostics,
+            }
 
     ws = None
     client_id = str(uuid.uuid4())
@@ -483,9 +555,11 @@ def handler(job):
         if prompt_id not in history:
             error_msg = f"Prompt {prompt_id} não encontrado no histórico."
             if not errors:
-                return {"error": error_msg}
+                diagnostics = _build_runtime_diagnostics(error_msg)
+                return {"error": error_msg, "diagnostics": diagnostics}
             errors.append(error_msg)
-            return {"error": "Job falhou", "details": errors}
+            diagnostics = _build_runtime_diagnostics(errors)
+            return {"error": "Job falhou", "details": errors, "diagnostics": diagnostics}
 
         outputs = history.get(prompt_id, {}).get("outputs", {})
         print(f"worker-ltx-video - Processando {len(outputs)} nós de saída...")
@@ -592,19 +666,31 @@ def handler(job):
     except websocket.WebSocketException as e:
         print(f"worker-ltx-video - WebSocket Error: {e}")
         print(traceback.format_exc())
-        return {"error": f"WebSocket error: {e}"}
+        diagnostics = _build_runtime_diagnostics(str(e))
+        if diagnostics and diagnostics.get("category") in {"GPU_OOM", "GPU_RUNTIME"}:
+            print("worker-ltx-video - Runtime diagnostics:", json.dumps(diagnostics))
+        return {"error": f"WebSocket error: {e}", "diagnostics": diagnostics}
     except requests.RequestException as e:
         print(f"worker-ltx-video - HTTP Error: {e}")
         print(traceback.format_exc())
-        return {"error": f"HTTP error: {e}"}
+        diagnostics = _build_runtime_diagnostics(str(e))
+        if diagnostics and diagnostics.get("category") in {"GPU_OOM", "GPU_RUNTIME"}:
+            print("worker-ltx-video - Runtime diagnostics:", json.dumps(diagnostics))
+        return {"error": f"HTTP error: {e}", "diagnostics": diagnostics}
     except ValueError as e:
         print(f"worker-ltx-video - Value Error: {e}")
         print(traceback.format_exc())
-        return {"error": str(e)}
+        diagnostics = _build_runtime_diagnostics(str(e))
+        if diagnostics and diagnostics.get("category") in {"GPU_OOM", "GPU_RUNTIME"}:
+            print("worker-ltx-video - Runtime diagnostics:", json.dumps(diagnostics))
+        return {"error": str(e), "diagnostics": diagnostics}
     except Exception as e:
         print(f"worker-ltx-video - Unexpected Error: {e}")
         print(traceback.format_exc())
-        return {"error": f"Erro inesperado: {e}"}
+        diagnostics = _build_runtime_diagnostics(str(e))
+        if diagnostics and diagnostics.get("category") in {"GPU_OOM", "GPU_RUNTIME"}:
+            print("worker-ltx-video - Runtime diagnostics:", json.dumps(diagnostics))
+        return {"error": f"Erro inesperado: {e}", "diagnostics": diagnostics}
     finally:
         if ws and ws.connected:
             ws.close()
@@ -626,14 +712,24 @@ def handler(job):
 
     if errors:
         final_result["errors"] = errors
+        diagnostics = _build_runtime_diagnostics(errors)
+        if diagnostics:
+            final_result["diagnostics"] = diagnostics
+            if diagnostics.get("category") in {"GPU_OOM", "GPU_RUNTIME"}:
+                print("worker-ltx-video - Runtime diagnostics:", json.dumps(diagnostics))
 
     has_output = output_data or video_data or audio_data
     if not has_output and errors:
-        return {"error": "Job falhou sem output", "details": errors}
+        diagnostics = _build_runtime_diagnostics(errors)
+        if diagnostics and diagnostics.get("category") in {"GPU_OOM", "GPU_RUNTIME"}:
+            print("worker-ltx-video - Runtime diagnostics:", json.dumps(diagnostics))
+        return {"error": "Job falhou sem output", "details": errors, "diagnostics": diagnostics}
     elif not has_output and not errors:
+        diagnostics = _build_runtime_diagnostics(history_output_summary)
         return {
             "error": "Job concluído sem mídia no histórico do ComfyUI",
             "details": history_output_summary,
+            "diagnostics": diagnostics,
         }
 
     print(f"worker-ltx-video - Job concluído: {len(output_data)} img, {len(video_data)} vid, {len(audio_data)} audio")

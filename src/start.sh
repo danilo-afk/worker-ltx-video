@@ -43,6 +43,7 @@ if [ -d "$VOLUME" ]; then
   esac
   CKPT="$VOLUME/models/checkpoints/$CKPT_NAME"
   GEMMA_DIR="$VOLUME/models/text_encoders/gemma-3-fp8"
+  GEMMA_OFFICIAL_DIR="$VOLUME/models/text_encoders/gemma-3-12b-it-qat-q4_0-unquantized"
   GEMMA_MODEL="$GEMMA_DIR/model.safetensors"
   TOKENIZER="$GEMMA_DIR/tokenizer.model"
 
@@ -147,6 +148,23 @@ PY
     return 1
   }
 
+  resolve_download_url() {
+    local label="$1"
+    shift
+    local candidate
+    for candidate in "$@"; do
+      [ -z "$candidate" ] && continue
+      local code
+      code=$(curl -L -s -o /dev/null -w "%{http_code}" --range 0-0 "$candidate" || true)
+      if [ "$code" = "200" ] || [ "$code" = "206" ]; then
+        echo "$candidate"
+        return 0
+      fi
+      echo "worker-ltx-video: ${label} URL indisponível (${code}): $candidate" >&2
+    done
+    return 1
+  }
+
   if ! check_size "$CKPT" "$CKPT_MIN"; then
     if ! download_with_validation "$CKPT" "$CKPT_MIN" "$CKPT_URL" "checkpoint LTX-2 ($CKPT_NAME)"; then
       exit 1
@@ -164,7 +182,17 @@ PY
     rm -f "$GEMMA_MODEL"
   fi
 
-  GEMMA_URL="https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors"
+  GEMMA_URL_OVERRIDE="${LTX_GEMMA_URL:-}"
+  GEMMA_URL=$(resolve_download_url \
+    "Gemma" \
+    "$GEMMA_URL_OVERRIDE" \
+    "https://huggingface.co/Comfy-Org/ltx-2/resolve/main/split_files/text_encoders/gemma_3_12B_it_fp8_scaled.safetensors" \
+    "https://huggingface.co/google/gemma-3-12b-it-qat-q4_0-unquantized/resolve/main/model-00001-of-00005.safetensors")
+  if [ -z "$GEMMA_URL" ]; then
+    echo "worker-ltx-video: ERRO sem URL válida para Gemma." >&2
+    exit 1
+  fi
+  echo "worker-ltx-video: Gemma URL selecionada: $GEMMA_URL"
   if ! check_size "$GEMMA_MODEL" "$GEMMA_MIN"; then
     if ! download_with_validation "$GEMMA_MODEL" "$GEMMA_MIN" "$GEMMA_URL" "Gemma 3 FP8 Scaled"; then
       exit 1
@@ -202,6 +230,27 @@ PY
 PPEOF
     echo "worker-ltx-video: preprocessor_config.json criado"
   fi
+
+  # Compatibilidade com o path do workflow oficial LTX-2 I2V.
+  mkdir -p "$GEMMA_OFFICIAL_DIR"
+  ln -sf "../gemma-3-fp8/model.safetensors" \
+    "$GEMMA_OFFICIAL_DIR/model.safetensors"
+  ln -sf "../gemma-3-fp8/model.safetensors" \
+    "$GEMMA_OFFICIAL_DIR/model-00001-of-00005.safetensors"
+  ln -sf "../gemma-3-fp8/tokenizer.model" \
+    "$GEMMA_OFFICIAL_DIR/tokenizer.model"
+  ln -sf "../gemma-3-fp8/tokenizer_config.json" \
+    "$GEMMA_OFFICIAL_DIR/tokenizer_config.json"
+  ln -sf "../gemma-3-fp8/tokenizer.json" \
+    "$GEMMA_OFFICIAL_DIR/tokenizer.json"
+  ln -sf "../gemma-3-fp8/special_tokens_map.json" \
+    "$GEMMA_OFFICIAL_DIR/special_tokens_map.json"
+  ln -sf "../gemma-3-fp8/config.json" \
+    "$GEMMA_OFFICIAL_DIR/config.json"
+  ln -sf "../gemma-3-fp8/generation_config.json" \
+    "$GEMMA_OFFICIAL_DIR/generation_config.json"
+  ln -sf "../gemma-3-fp8/preprocessor_config.json" \
+    "$GEMMA_OFFICIAL_DIR/preprocessor_config.json"
 
   # Distilled LoRA (melhora qualidade com modelo dev)
   LORA="$VOLUME/models/loras/ltx-2-19b-distilled-lora-384.safetensors"

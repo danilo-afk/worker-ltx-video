@@ -94,6 +94,9 @@ RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git && \
     cd ComfyUI-VideoHelperSuite && \
     uv pip install --no-cache-dir -r requirements.txt
+
+# Compat: node utilitário usado em workflows oficiais LTX-2
+COPY src/custom_nodes/kiara_impact_compat /comfyui/custom_nodes/kiara_impact_compat
 # ==========================================
 
 CMD ["/start.sh"]
