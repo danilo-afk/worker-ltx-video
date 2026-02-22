@@ -28,6 +28,7 @@ COMFY_API_AVAILABLE_INTERVAL_MS = 50
 COMFY_API_AVAILABLE_MAX_RETRIES = 500
 WEBSOCKET_RECONNECT_ATTEMPTS = int(os.environ.get("WEBSOCKET_RECONNECT_ATTEMPTS", 5))
 WEBSOCKET_RECONNECT_DELAY_S = int(os.environ.get("WEBSOCKET_RECONNECT_DELAY_S", 3))
+MAX_INLINE_VIDEO_BYTES = int(os.environ.get("MAX_INLINE_VIDEO_BYTES", 4_000_000))
 
 if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
     websocket.enableTrace(True)
@@ -206,6 +207,26 @@ def upload_binary_artifact(job_id, payload_bytes, filename, default_ext):
             os.remove(tmp_path)
 
 
+def _has_output_node(workflow):
+    """Validação mínima: workflow precisa ter ao menos um output node conhecido."""
+    if not isinstance(workflow, dict):
+        return False
+
+    output_nodes = {
+        "VHS_VideoCombine",
+        "SaveVideo",
+        "SaveWEBM",
+        "SaveImage",
+        "PreviewImage",
+    }
+    for node in workflow.values():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") in output_nodes:
+            return True
+    return False
+
+
 def validate_input(job_input):
     """Valida input do job."""
     if job_input is None:
@@ -220,6 +241,8 @@ def validate_input(job_input):
     workflow = job_input.get("workflow")
     if workflow is None:
         return None, "Missing 'workflow' parameter"
+    if not _has_output_node(workflow):
+        return None, "Workflow sem output node reconhecido (ex: VHS_VideoCombine/SaveVideo)"
 
     images = job_input.get("images")
     if images is not None:
@@ -468,6 +491,12 @@ def handler(job):
         print(f"worker-ltx-video - Processando {len(outputs)} nós de saída...")
 
         for node_id, node_output in outputs.items():
+            if not isinstance(node_output, dict):
+                history_output_summary.append(
+                    {"node_id": str(node_id), "keys": [], "warning": "node_output not dict"}
+                )
+                continue
+
             if isinstance(node_output, dict):
                 history_output_summary.append(
                     {"node_id": str(node_id), "keys": sorted(list(node_output.keys()))}
@@ -501,6 +530,8 @@ def handler(job):
                         else:
                             b64 = base64.b64encode(image_bytes).decode("utf-8")
                             output_data.append({"filename": filename, "type": "base64", "data": b64})
+                    else:
+                        errors.append(f"Falha ao ler imagem {filename} via /view")
 
             # Vídeos (VHS usa "gifs"; SaveVideo pode expor "videos")
             video_entries = []
@@ -530,8 +561,16 @@ def handler(job):
                             video_data.append({"filename": filename, "type": "s3_url", "data": uploaded_url})
                         except Exception as e:
                             print(f"worker-ltx-video - Upload remoto de vídeo falhou ({filename}): {e}. Fallback base64.")
-                            b64 = base64.b64encode(vid_bytes).decode("utf-8")
-                            video_data.append({"filename": filename, "type": "base64", "data": b64})
+                            if len(vid_bytes) > MAX_INLINE_VIDEO_BYTES:
+                                errors.append(
+                                    f"Vídeo {filename} excede limite inline ({len(vid_bytes)} bytes > {MAX_INLINE_VIDEO_BYTES}) "
+                                    "e upload remoto falhou"
+                                )
+                            else:
+                                b64 = base64.b64encode(vid_bytes).decode("utf-8")
+                                video_data.append({"filename": filename, "type": "base64", "data": b64})
+                    else:
+                        errors.append(f"Falha ao ler vídeo {filename} via /view")
 
             # Áudio (LTX-2 pode gerar áudio sincronizado)
             if "audio" in node_output:
@@ -547,6 +586,8 @@ def handler(job):
                     if audio_bytes:
                         b64 = base64.b64encode(audio_bytes).decode("utf-8")
                         audio_data.append({"filename": filename, "type": "base64", "data": b64})
+                    else:
+                        errors.append(f"Falha ao ler áudio {filename} via /view")
 
     except websocket.WebSocketException as e:
         print(f"worker-ltx-video - WebSocket Error: {e}")
