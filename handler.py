@@ -25,11 +25,12 @@ from network_volume import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-COMFY_API_AVAILABLE_INTERVAL_MS = 50
-COMFY_API_AVAILABLE_MAX_RETRIES = 500
+COMFY_API_AVAILABLE_INTERVAL_MS = int(os.environ.get("COMFY_API_AVAILABLE_INTERVAL_MS", 100))
+COMFY_API_AVAILABLE_MAX_RETRIES = int(os.environ.get("COMFY_API_AVAILABLE_MAX_RETRIES", 1800))
 WEBSOCKET_RECONNECT_ATTEMPTS = int(os.environ.get("WEBSOCKET_RECONNECT_ATTEMPTS", 5))
 WEBSOCKET_RECONNECT_DELAY_S = int(os.environ.get("WEBSOCKET_RECONNECT_DELAY_S", 3))
 MAX_INLINE_VIDEO_BYTES = int(os.environ.get("MAX_INLINE_VIDEO_BYTES", 4_000_000))
+COMFY_STARTUP_LOG = os.environ.get("COMFY_STARTUP_LOG", "/tmp/comfyui.log")
 
 if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
     websocket.enableTrace(True)
@@ -103,6 +104,17 @@ def _build_runtime_diagnostics(parts):
         "category": "UNKNOWN",
         "message": joined[:1200],
     }
+
+
+def _read_comfy_log_tail(max_lines=120):
+    if not COMFY_STARTUP_LOG or not os.path.exists(COMFY_STARTUP_LOG):
+        return []
+    try:
+        with open(COMFY_STARTUP_LOG, "r", encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+        return [line.rstrip("\n") for line in lines[-max_lines:] if line.strip()]
+    except Exception as exc:
+        return [f"(falha ao ler log de startup: {exc})"]
 
 
 def _extract_loadimage_nodes(workflow):
@@ -464,8 +476,18 @@ def handler(job):
         COMFY_API_AVAILABLE_INTERVAL_MS,
     ):
         message = f"ComfyUI ({COMFY_HOST}) inacessível após múltiplas tentativas."
-        diagnostics = _build_runtime_diagnostics(message)
-        return {"error": message, "diagnostics": diagnostics}
+        startup_tail = _read_comfy_log_tail()
+        diagnostics = _build_runtime_diagnostics([message] + startup_tail)
+        if startup_tail:
+            print("worker-ltx-video - Comfy startup log tail:\n" + "\n".join(startup_tail[-40:]))
+        return {
+            "error": message,
+            "details": {
+                "comfy_startup_log_tail": startup_tail[-120:],
+                "wait_ms": COMFY_API_AVAILABLE_MAX_RETRIES * COMFY_API_AVAILABLE_INTERVAL_MS,
+            },
+            "diagnostics": diagnostics,
+        }
 
     if input_images:
         upload_result = upload_images(input_images)
