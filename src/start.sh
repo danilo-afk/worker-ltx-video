@@ -154,9 +154,26 @@ PY
     local candidate
     for candidate in "$@"; do
       [ -z "$candidate" ] && continue
-      local code
-      code=$(curl -L -s -o /dev/null -w "%{http_code}" --range 0-0 "$candidate" || true)
-      if [ "$code" = "200" ] || [ "$code" = "206" ]; then
+      local ok=1
+      local code="n/a"
+      if command -v curl >/dev/null 2>&1; then
+        code=$(curl -L -s -o /dev/null -w "%{http_code}" --range 0-0 "$candidate" || true)
+        if [ "$code" = "200" ] || [ "$code" = "206" ]; then
+          ok=0
+        fi
+      elif command -v wget >/dev/null 2>&1; then
+        if wget --spider -q "$candidate"; then
+          ok=0
+          code="200"
+        else
+          code="wget_fail"
+        fi
+      else
+        echo "worker-ltx-video: nem curl nem wget disponíveis para validar URL" >&2
+        return 1
+      fi
+
+      if [ "$ok" -eq 0 ]; then
         echo "$candidate"
         return 0
       fi
