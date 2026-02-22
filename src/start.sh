@@ -304,17 +304,71 @@ echo "worker-ltx-video: Starting ComfyUI"
 
 : "${COMFY_LOG_LEVEL:=DEBUG}"
 : "${COMFY_STARTUP_LOG:=/tmp/comfyui.log}"
+: "${GPU_READY_MAX_ATTEMPTS:=180}"
+: "${GPU_READY_SLEEP_SECONDS:=2}"
 mkdir -p "$(dirname "$COMFY_STARTUP_LOG")"
 : > "$COMFY_STARTUP_LOG"
 echo "worker-ltx-video: startup log em $COMFY_STARTUP_LOG"
 
+export PYTORCH_NVML_BASED_CUDA_CHECK=1
+export CUDA_MODULE_LOADING=LAZY
+
+print_gpu_snapshot() {
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "worker-ltx-video: nvidia-smi snapshot:"
+    nvidia-smi -L || true
+    nvidia-smi --query-gpu=index,name,uuid,memory.total,memory.used,utilization.gpu --format=csv,noheader || true
+  else
+    echo "worker-ltx-video: nvidia-smi não encontrado" >&2
+  fi
+}
+
+wait_for_gpu_ready() {
+  local attempt=1
+  while [ "$attempt" -le "$GPU_READY_MAX_ATTEMPTS" ]; do
+    if command -v nvidia-smi >/dev/null 2>&1; then
+      if nvidia-smi -L >/dev/null 2>&1; then
+        echo "worker-ltx-video: GPU pronta (tentativa ${attempt}/${GPU_READY_MAX_ATTEMPTS})"
+        return 0
+      fi
+    else
+      # fallback sem nvidia-smi
+      return 0
+    fi
+    echo "worker-ltx-video: aguardando GPU ficar disponível (${attempt}/${GPU_READY_MAX_ATTEMPTS})..."
+    sleep "$GPU_READY_SLEEP_SECONDS"
+    attempt=$((attempt + 1))
+  done
+  echo "worker-ltx-video: GPU indisponível após ${GPU_READY_MAX_ATTEMPTS} tentativas" >&2
+  return 1
+}
+
+start_comfy_supervisor() {
+  local comfy_args=("$@")
+  (
+    local attempt=1
+    while true; do
+      echo "worker-ltx-video: iniciando ComfyUI (attempt ${attempt})"
+      python -u /comfyui/main.py "${comfy_args[@]}" >> "$COMFY_STARTUP_LOG" 2>&1
+      local code=$?
+      echo "worker-ltx-video: ComfyUI saiu com código ${code} (attempt ${attempt})" | tee -a "$COMFY_STARTUP_LOG"
+      attempt=$((attempt + 1))
+      sleep 4
+      wait_for_gpu_ready || true
+    done
+  ) &
+}
+
+print_gpu_snapshot
+wait_for_gpu_ready
+
 if [ "$SERVE_API_LOCALLY" == "true" ]; then
-    python -u /comfyui/main.py --disable-auto-launch --disable-metadata --listen --verbose "${COMFY_LOG_LEVEL}" --log-stdout >> "$COMFY_STARTUP_LOG" 2>&1 &
+    start_comfy_supervisor --disable-auto-launch --disable-metadata --listen --verbose "${COMFY_LOG_LEVEL}" --log-stdout
 
     echo "worker-ltx-video: Starting RunPod Handler"
     python -u /handler.py --rp_serve_api --rp_api_host=0.0.0.0
 else
-    python -u /comfyui/main.py --disable-auto-launch --disable-metadata --verbose "${COMFY_LOG_LEVEL}" --log-stdout >> "$COMFY_STARTUP_LOG" 2>&1 &
+    start_comfy_supervisor --disable-auto-launch --disable-metadata --verbose "${COMFY_LOG_LEVEL}" --log-stdout
 
     echo "worker-ltx-video: Starting RunPod Handler"
     python -u /handler.py
