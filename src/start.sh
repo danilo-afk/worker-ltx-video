@@ -25,8 +25,10 @@ if [ -d "$VOLUME" ]; then
     echo "worker-ltx-video: flock não encontrado; bootstrap seguirá sem lock" >&2
   fi
 
-  # Checkpoint padrão: distilled oficial (não-FP8), alinhado ao workflow oficial LTX-2 I2V.
-  CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled.safetensors}"
+  # Default serverless: FP8 para bootstrap rápido e evitar worker unhealthy por cold-start longo.
+  # Para usar o checkpoint oficial completo, defina:
+  #   LTX_CKPT_NAME=ltx-2-19b-distilled.safetensors
+  CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled-fp8.safetensors}"
   case "$CKPT_NAME" in
     ltx-2-19b-distilled.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled.safetensors"
