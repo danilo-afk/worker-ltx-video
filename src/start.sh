@@ -195,9 +195,24 @@ PY
   fi
 
   # Compatibilidade com workflows antigos/oficiais que usam outros nomes de arquivo.
-  ln -sf "$CKPT_NAME" "$VOLUME/models/checkpoints/ltx-2-19b-dev-fp8.safetensors"
-  ln -sf "$CKPT_NAME" "$VOLUME/models/checkpoints/ltx-2-19b-distilled.safetensors"
-  ln -sf "$CKPT_NAME" "$VOLUME/models/checkpoints/ltx-2-19b-distilled-fp8.safetensors"
+  # Se um checkpoint real já foi pré-carregado no volume, não sobrescreve com symlink.
+  ensure_checkpoint_alias() {
+    alias_name="$1"
+    alias_target="$2"
+    alias_path="$VOLUME/models/checkpoints/$alias_name"
+    alias_real_target="$VOLUME/models/checkpoints/$alias_target"
+
+    if [ -f "$alias_path" ] && [ ! -L "$alias_path" ]; then
+      echo "worker-ltx-video: preservando checkpoint real já presente no volume: $alias_name"
+      return 0
+    fi
+
+    ln -sfn "$alias_target" "$alias_path"
+  }
+
+  ensure_checkpoint_alias "ltx-2-19b-dev-fp8.safetensors" "$CKPT_NAME"
+  ensure_checkpoint_alias "ltx-2-19b-distilled.safetensors" "$CKPT_NAME"
+  ensure_checkpoint_alias "ltx-2-19b-distilled-fp8.safetensors" "$CKPT_NAME"
 
   # Marker para forçar re-download quando fonte muda
   GEMMA_MARKER="$GEMMA_DIR/.source-comfy-org-fp8-scaled"
