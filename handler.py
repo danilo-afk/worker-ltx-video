@@ -36,6 +36,7 @@ WEBSOCKET_RECONNECT_ATTEMPTS = int(os.environ.get("WEBSOCKET_RECONNECT_ATTEMPTS"
 WEBSOCKET_RECONNECT_DELAY_S = int(os.environ.get("WEBSOCKET_RECONNECT_DELAY_S", 3))
 MAX_INLINE_VIDEO_BYTES = int(os.environ.get("MAX_INLINE_VIDEO_BYTES", 4_000_000))
 COMFY_STARTUP_LOG = os.environ.get("COMFY_STARTUP_LOG", "/tmp/comfyui.log")
+WORKFLOW_EVENT_IDLE_TIMEOUT_S = int(os.environ.get("WORKFLOW_EVENT_IDLE_TIMEOUT_S", 180))
 
 if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
     websocket.enableTrace(True)
@@ -218,6 +219,21 @@ def _extract_loadimage_nodes(workflow):
         load_nodes.append({"node_id": str(node_id), "expected_image": expected_image})
 
     return load_nodes
+
+
+def _build_workflow_node_lookup(workflow):
+    lookup = {}
+    if not isinstance(workflow, dict):
+        return lookup
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            continue
+        lookup[str(node_id)] = node.get("class_type") or "unknown"
+    return lookup
+
+
+def _log_ws_event(prefix, payload):
+    print(f"worker-ltx-video - {prefix}:", json.dumps(payload, ensure_ascii=False))
 
 
 def _log_job_diagnostics(job_id, job_input, workflow, input_images):
@@ -679,6 +695,7 @@ def handler(job):
     audio_data = []
     errors = []
     history_output_summary = []
+    workflow_nodes = _build_workflow_node_lookup(workflow)
 
     try:
         ws_url = f"ws://{COMFY_HOST}/ws?clientId={client_id}"
@@ -703,30 +720,108 @@ def handler(job):
 
         print(f"worker-ltx-video - Aguardando execução ({prompt_id})...")
         execution_done = False
+        last_event_at = time.time()
+        last_queue_remaining = None
+        current_node_id = None
         while True:
             try:
                 out = ws.recv()
                 if isinstance(out, str):
                     message = json.loads(out)
-                    if message.get("type") == "status":
+                    message_type = message.get("type")
+                    data = message.get("data", {})
+                    if message_type == "status":
                         status_data = message.get("data", {}).get("status", {})
-                        print(f"worker-ltx-video - Queue: {status_data.get('exec_info', {}).get('queue_remaining', 'N/A')} restantes")
-                    elif message.get("type") == "executing":
-                        data = message.get("data", {})
+                        queue_remaining = status_data.get("exec_info", {}).get("queue_remaining", "N/A")
+                        if queue_remaining != last_queue_remaining:
+                            print(f"worker-ltx-video - Queue: {queue_remaining} restantes")
+                            last_queue_remaining = queue_remaining
+                        last_event_at = time.time()
+                    elif message_type == "execution_start":
+                        if data.get("prompt_id") == prompt_id:
+                            _log_ws_event("Execution start", {"prompt_id": prompt_id})
+                            last_event_at = time.time()
+                    elif message_type == "execution_cached":
+                        if data.get("prompt_id") == prompt_id:
+                            _log_ws_event(
+                                "Execution cached",
+                                {
+                                    "prompt_id": prompt_id,
+                                    "nodes": data.get("nodes", []),
+                                },
+                            )
+                            last_event_at = time.time()
+                    elif message_type == "executing":
                         if data.get("node") is None and data.get("prompt_id") == prompt_id:
                             print(f"worker-ltx-video - Execução finalizada: {prompt_id}")
                             execution_done = True
                             break
-                    elif message.get("type") == "execution_error":
-                        data = message.get("data", {})
+                        if data.get("prompt_id") == prompt_id:
+                            current_node_id = str(data.get("node")) if data.get("node") is not None else None
+                            _log_ws_event(
+                                "Executing node",
+                                {
+                                    "prompt_id": prompt_id,
+                                    "node_id": current_node_id,
+                                    "class_type": workflow_nodes.get(current_node_id, "unknown") if current_node_id else None,
+                                },
+                            )
+                            last_event_at = time.time()
+                    elif message_type == "progress":
+                        value = data.get("value")
+                        max_value = data.get("max")
+                        progress_payload = {
+                            "prompt_id": prompt_id,
+                            "node_id": current_node_id,
+                            "class_type": workflow_nodes.get(current_node_id, "unknown") if current_node_id else None,
+                            "value": value,
+                            "max": max_value,
+                        }
+                        _log_ws_event("Progress", progress_payload)
+                        last_event_at = time.time()
+                    elif message_type == "executed":
+                        if data.get("prompt_id") == prompt_id:
+                            node_id = str(data.get("node")) if data.get("node") is not None else None
+                            output = data.get("output")
+                            _log_ws_event(
+                                "Executed node",
+                                {
+                                    "prompt_id": prompt_id,
+                                    "node_id": node_id,
+                                    "class_type": workflow_nodes.get(node_id, "unknown") if node_id else None,
+                                    "output_keys": _safe_dict_keys(output),
+                                },
+                            )
+                            last_event_at = time.time()
+                    elif message_type == "execution_success":
+                        if data.get("prompt_id") == prompt_id:
+                            _log_ws_event("Execution success", {"prompt_id": prompt_id})
+                            last_event_at = time.time()
+                    elif message_type == "execution_interrupted":
+                        if data.get("prompt_id") == prompt_id:
+                            errors.append("Execution interrupted pelo ComfyUI")
+                            _log_ws_event("Execution interrupted", {"prompt_id": prompt_id})
+                            break
+                    elif message_type == "execution_error":
                         if data.get("prompt_id") == prompt_id:
                             error_details = f"Node: {data.get('node_type')}, ID: {data.get('node_id')}, Msg: {data.get('exception_message')}"
                             print(f"worker-ltx-video - Erro de execução: {error_details}")
                             errors.append(f"Execution error: {error_details}")
                             break
+                    else:
+                        if data.get("prompt_id") == prompt_id:
+                            _log_ws_event("WS event", {"type": message_type, "data_keys": _safe_dict_keys(data)})
+                            last_event_at = time.time()
                 else:
                     continue
             except websocket.WebSocketTimeoutException:
+                idle_for = int(time.time() - last_event_at)
+                if idle_for >= WORKFLOW_EVENT_IDLE_TIMEOUT_S:
+                    current_node_class = workflow_nodes.get(current_node_id, "unknown") if current_node_id else None
+                    raise ValueError(
+                        f"Sem eventos do websocket por {idle_for}s após enqueue do prompt {prompt_id}. "
+                        f"Último node conhecido: {current_node_id or 'none'} ({current_node_class or 'unknown'})."
+                    )
                 continue
             except websocket.WebSocketConnectionClosedException as closed_err:
                 try:
