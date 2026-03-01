@@ -37,6 +37,7 @@ WEBSOCKET_RECONNECT_DELAY_S = int(os.environ.get("WEBSOCKET_RECONNECT_DELAY_S", 
 MAX_INLINE_VIDEO_BYTES = int(os.environ.get("MAX_INLINE_VIDEO_BYTES", 4_000_000))
 COMFY_STARTUP_LOG = os.environ.get("COMFY_STARTUP_LOG", "/tmp/comfyui.log")
 WORKFLOW_EVENT_IDLE_TIMEOUT_S = int(os.environ.get("WORKFLOW_EVENT_IDLE_TIMEOUT_S", 180))
+GEMMA_NODE_IDLE_TIMEOUT_S = int(os.environ.get("GEMMA_NODE_IDLE_TIMEOUT_S", 900))
 
 if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
     websocket.enableTrace(True)
@@ -234,6 +235,58 @@ def _build_workflow_node_lookup(workflow):
 
 def _log_ws_event(prefix, payload):
     print(f"worker-ltx-video - {prefix}:", json.dumps(payload, ensure_ascii=False))
+
+
+def _resolve_model_probe(path_hint, categories):
+    if not isinstance(path_hint, str) or not path_hint:
+        return {"path_hint": path_hint, "resolved": None, "exists": False}
+
+    candidates = []
+    if os.path.isabs(path_hint):
+        candidates.append(path_hint)
+    else:
+        for category in categories:
+            candidates.append(os.path.join("/runpod-volume/models", category, path_hint))
+            candidates.append(os.path.join("/comfyui/models", category, path_hint))
+
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            info = {
+                "path_hint": path_hint,
+                "resolved": candidate,
+                "exists": True,
+                "size_bytes": os.path.getsize(candidate),
+            }
+            try:
+                with open(candidate, "rb") as fh:
+                    info["sha256_16"] = hashlib.sha256(fh.read(1024 * 1024)).hexdigest()[:16]
+            except Exception as exc:
+                info["sha256_error"] = str(exc)
+            return info
+
+    return {"path_hint": path_hint, "resolved": None, "exists": False, "candidates": candidates}
+
+
+def _preflight_gemma_loader(workflow):
+    results = []
+    if not isinstance(workflow, dict):
+        return results
+
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict) or node.get("class_type") != "LTXVGemmaCLIPModelLoader":
+            continue
+        inputs = node.get("inputs", {})
+        if not isinstance(inputs, dict):
+            inputs = {}
+        gemma_path = inputs.get("gemma_path")
+        ltxv_path = inputs.get("ltxv_path")
+        results.append({
+            "node_id": str(node_id),
+            "gemma_path": _resolve_model_probe(gemma_path, ["text_encoders", "LLM"]),
+            "ltxv_path": _resolve_model_probe(ltxv_path, ["checkpoints"]),
+            "max_length": inputs.get("max_length"),
+        })
+    return results
 
 
 def _log_job_diagnostics(job_id, job_input, workflow, input_images):
@@ -687,6 +740,13 @@ def handler(job):
                     "diagnostics": diagnostics,
                 }
 
+    gemma_preflight = _preflight_gemma_loader(workflow)
+    if gemma_preflight:
+        print(
+            "worker-ltx-video - Gemma loader preflight:",
+            json.dumps(gemma_preflight, ensure_ascii=False),
+        )
+
     ws = None
     client_id = str(uuid.uuid4())
     prompt_id = None
@@ -816,11 +876,14 @@ def handler(job):
                     continue
             except websocket.WebSocketTimeoutException:
                 idle_for = int(time.time() - last_event_at)
-                if idle_for >= WORKFLOW_EVENT_IDLE_TIMEOUT_S:
+                current_node_class = workflow_nodes.get(current_node_id, "unknown") if current_node_id else None
+                idle_limit = GEMMA_NODE_IDLE_TIMEOUT_S if current_node_class == "LTXVGemmaCLIPModelLoader" else WORKFLOW_EVENT_IDLE_TIMEOUT_S
+                if idle_for >= idle_limit:
                     current_node_class = workflow_nodes.get(current_node_id, "unknown") if current_node_id else None
                     raise ValueError(
                         f"Sem eventos do websocket por {idle_for}s após enqueue do prompt {prompt_id}. "
-                        f"Último node conhecido: {current_node_id or 'none'} ({current_node_class or 'unknown'})."
+                        f"Último node conhecido: {current_node_id or 'none'} ({current_node_class or 'unknown'}). "
+                        f"Limite aplicado: {idle_limit}s."
                     )
                 continue
             except websocket.WebSocketConnectionClosedException as closed_err:
