@@ -28,9 +28,15 @@ if [ -d "$VOLUME" ]; then
   # Default serverless: FP8 para bootstrap rápido e evitar worker unhealthy por cold-start longo.
   # Para usar o checkpoint oficial completo, defina:
   #   LTX_CKPT_NAME=ltx-2-19b-distilled.safetensors
+  # Para reaproveitar um checkpoint full já enviado ao volume sob um nome temporário:
+  #   LTX_CKPT_NAME=ltx-2-19b-distilled.full-43285058186.safetensors
   CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled-fp8.safetensors}"
   case "$CKPT_NAME" in
     ltx-2-19b-distilled.safetensors)
+      CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled.safetensors"
+      CKPT_MIN=40000000000
+      ;;
+    ltx-2-19b-distilled.full-43285058186.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled.safetensors"
       CKPT_MIN=40000000000
       ;;
@@ -196,25 +202,32 @@ PY
   CKPT_SIZE=$(stat -c%s "$CKPT" 2>/dev/null || stat -f%z "$CKPT" 2>/dev/null || echo "unknown")
   echo "worker-ltx-video: checkpoint selecionado: $CKPT_NAME (${CKPT_SIZE} bytes)"
 
-  # Compatibilidade com workflows antigos/oficiais que usam outros nomes de arquivo.
-  # Se um checkpoint real já foi pré-carregado no volume, não sobrescreve com symlink.
+  # Compatibilidade com workflows que sempre pedem o nome canônico do checkpoint distilled.
+  # Se o arquivo existente nesse path for placeholder/corrompido, substitui pelo alias correto.
   ensure_checkpoint_alias() {
     alias_name="$1"
     alias_target="$2"
+    alias_min="$3"
     alias_path="$VOLUME/models/checkpoints/$alias_name"
     alias_real_target="$VOLUME/models/checkpoints/$alias_target"
 
-    if [ -f "$alias_path" ] && [ ! -L "$alias_path" ]; then
-      echo "worker-ltx-video: preservando checkpoint real já presente no volume: $alias_name"
+    if [ "$alias_name" = "$alias_target" ]; then
       return 0
     fi
 
+    if [ -f "$alias_path" ] && [ ! -L "$alias_path" ]; then
+      if check_size "$alias_path" "$alias_min" >/dev/null 2>&1; then
+        echo "worker-ltx-video: preservando checkpoint real já presente no volume: $alias_name"
+        return 0
+      fi
+      echo "worker-ltx-video: substituindo checkpoint placeholder/corrompido: $alias_name"
+    fi
+
+    rm -f "$alias_path"
     ln -sfn "$alias_target" "$alias_path"
   }
 
-  ensure_checkpoint_alias "ltx-2-19b-dev-fp8.safetensors" "$CKPT_NAME"
-  ensure_checkpoint_alias "ltx-2-19b-distilled.safetensors" "$CKPT_NAME"
-  ensure_checkpoint_alias "ltx-2-19b-distilled-fp8.safetensors" "$CKPT_NAME"
+  ensure_checkpoint_alias "ltx-2-19b-distilled.safetensors" "$CKPT_NAME" "$CKPT_MIN"
 
   # Marker para forçar re-download quando fonte muda
   GEMMA_MARKER="$GEMMA_DIR/.source-comfy-org-fp8-scaled"
