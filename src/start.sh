@@ -360,6 +360,16 @@ print_gpu_snapshot() {
   fi
 }
 
+print_comfy_failure_excerpt() {
+  local log_file="$1"
+  echo "worker-ltx-video: últimas linhas do ComfyUI log:" >&2
+  if [ -f "$log_file" ]; then
+    tail -n 120 "$log_file" >&2 || true
+  else
+    echo "worker-ltx-video: log não encontrado em $log_file" >&2
+  fi
+}
+
 wait_for_gpu_ready() {
   local attempt=1
   while [ "$attempt" -le "$GPU_READY_MAX_ATTEMPTS" ]; do
@@ -382,13 +392,34 @@ wait_for_gpu_ready() {
 
 start_comfy_supervisor() {
   local comfy_args=("$@")
+  local max_fast_failures="${COMFY_MAX_FAST_FAILURES:-5}"
+  local fast_failure_window_s="${COMFY_FAST_FAILURE_WINDOW_S:-45}"
   (
     local attempt=1
+    local fast_failures=0
     while true; do
+      local started_at
+      started_at=$(date +%s)
       echo "worker-ltx-video: iniciando ComfyUI (attempt ${attempt})"
       python -u /comfyui/main.py "${comfy_args[@]}" >> "$COMFY_STARTUP_LOG" 2>&1
       local code=$?
-      echo "worker-ltx-video: ComfyUI saiu com código ${code} (attempt ${attempt})" | tee -a "$COMFY_STARTUP_LOG"
+      local ended_at
+      ended_at=$(date +%s)
+      local runtime_s=$((ended_at - started_at))
+      echo "worker-ltx-video: ComfyUI saiu com código ${code} (attempt ${attempt}, runtime ${runtime_s}s)" | tee -a "$COMFY_STARTUP_LOG"
+      print_comfy_failure_excerpt "$COMFY_STARTUP_LOG"
+
+      if [ "$runtime_s" -le "$fast_failure_window_s" ]; then
+        fast_failures=$((fast_failures + 1))
+      else
+        fast_failures=0
+      fi
+
+      if [ "$fast_failures" -ge "$max_fast_failures" ]; then
+        echo "worker-ltx-video: ComfyUI falhou rapidamente ${fast_failures} vezes; abortando worker para evitar loop infinito" | tee -a "$COMFY_STARTUP_LOG" >&2
+        exit 1
+      fi
+
       attempt=$((attempt + 1))
       sleep 4
       wait_for_gpu_ready || true
