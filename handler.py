@@ -928,9 +928,44 @@ def handler(job):
                     {"node_id": str(node_id), "keys": sorted(list(node_output.keys()))}
                 )
 
+            def normalize_output_entries(raw_value, label):
+                entries = []
+                if isinstance(raw_value, list):
+                    for idx, item in enumerate(raw_value):
+                        if isinstance(item, dict):
+                            entries.append(item)
+                        else:
+                            print(
+                                "worker-ltx-video - Ignorando item de saída não estruturado:",
+                                json.dumps(
+                                    {
+                                        "label": label,
+                                        "index": idx,
+                                        "python_type": type(item).__name__,
+                                        "value": item,
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            )
+                elif isinstance(raw_value, dict):
+                    entries.append(raw_value)
+                elif raw_value is not None:
+                    print(
+                        "worker-ltx-video - Ignorando saída não estruturada:",
+                        json.dumps(
+                            {
+                                "label": label,
+                                "python_type": type(raw_value).__name__,
+                                "value": raw_value,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    )
+                return entries
+
             # Imagens
             if "images" in node_output:
-                for image_info in node_output["images"]:
+                for image_info in normalize_output_entries(node_output["images"], "images"):
                     filename = image_info.get("filename")
                     subfolder = image_info.get("subfolder", "")
                     img_type = image_info.get("type")
@@ -961,18 +996,26 @@ def handler(job):
 
             # Vídeos (VHS usa "gifs"; SaveVideo pode expor "videos" ou "animated")
             video_entries = []
-            if isinstance(node_output.get("gifs"), list):
-                video_entries.extend(node_output["gifs"])
-            if isinstance(node_output.get("videos"), list):
-                video_entries.extend(node_output["videos"])
-            if isinstance(node_output.get("animated"), list):
-                video_entries.extend(node_output["animated"])
-            if isinstance(node_output.get("animated"), dict):
-                video_entries.append(node_output["animated"])
-            if isinstance(node_output.get("video"), list):
-                video_entries.extend(node_output["video"])
-            if isinstance(node_output.get("video"), dict):
-                video_entries.append(node_output["video"])
+            if any(key in node_output for key in ("gifs", "videos", "animated", "video")):
+                print(
+                    "worker-ltx-video - Video output raw summary:",
+                    json.dumps(
+                        {
+                            "node_id": str(node_id),
+                            "gifs_type": type(node_output.get("gifs")).__name__ if "gifs" in node_output else None,
+                            "videos_type": type(node_output.get("videos")).__name__ if "videos" in node_output else None,
+                            "animated_type": type(node_output.get("animated")).__name__ if "animated" in node_output else None,
+                            "video_type": type(node_output.get("video")).__name__ if "video" in node_output else None,
+                            "animated_preview": node_output.get("animated"),
+                        },
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                )
+            video_entries.extend(normalize_output_entries(node_output.get("gifs"), "gifs"))
+            video_entries.extend(normalize_output_entries(node_output.get("videos"), "videos"))
+            video_entries.extend(normalize_output_entries(node_output.get("animated"), "animated"))
+            video_entries.extend(normalize_output_entries(node_output.get("video"), "video"))
 
             if video_entries:
                 for vid_info in video_entries:
@@ -988,6 +1031,17 @@ def handler(job):
                         vid_bytes, filename = convert_video_to_mp4(vid_bytes, filename)
                         try:
                             uploaded_url = upload_binary_artifact(job_id, vid_bytes, filename, ".mp4")
+                            print(
+                                "worker-ltx-video - Video upload ok:",
+                                json.dumps(
+                                    {
+                                        "filename": filename,
+                                        "bytes": len(vid_bytes),
+                                        "url": uploaded_url,
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                            )
                             video_data.append({"filename": filename, "type": "s3_url", "data": uploaded_url})
                         except Exception as e:
                             print(f"worker-ltx-video - Upload remoto de vídeo falhou ({filename}): {e}. Fallback base64.")
@@ -1004,7 +1058,7 @@ def handler(job):
 
             # Áudio (LTX-2 pode gerar áudio sincronizado)
             if "audio" in node_output:
-                for audio_info in node_output["audio"]:
+                for audio_info in normalize_output_entries(node_output["audio"], "audio"):
                     filename = audio_info.get("filename")
                     subfolder = audio_info.get("subfolder", "")
                     audio_type = audio_info.get("type", "temp")
@@ -1059,6 +1113,17 @@ def handler(job):
     if video_data:
         final_result["video"] = video_data[0]["data"]
         final_result["video_filename"] = video_data[0]["filename"]
+        print(
+            "worker-ltx-video - Final video selected:",
+            json.dumps(
+                {
+                    "filename": video_data[0]["filename"],
+                    "type": video_data[0]["type"],
+                    "url": video_data[0]["data"] if video_data[0]["type"] == "s3_url" else None,
+                },
+                ensure_ascii=False,
+            ),
+        )
         if len(video_data) > 1:
             final_result["videos"] = video_data
 
