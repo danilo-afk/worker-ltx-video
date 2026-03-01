@@ -16,6 +16,7 @@ import traceback
 import logging
 import subprocess
 import re
+import hashlib
 try:
     from PIL import Image
 except ImportError:
@@ -62,6 +63,85 @@ GPU_PATTERNS = [
     re.compile(r"illegal memory access", re.IGNORECASE),
     re.compile(r"driver", re.IGNORECASE),
 ]
+
+
+def _detect_image_format(blob):
+    if blob[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if blob[:2] == b"\xff\xd8":
+        return "jpeg"
+    if blob[:4] == b"RIFF" and blob[8:12] == b"WEBP":
+        return "webp"
+    if blob[:3] == b"GIF":
+        return "gif"
+    return "unknown"
+
+
+def _summarize_bytes(blob):
+    return {
+        "size_bytes": len(blob),
+        "sha256_16": hashlib.sha256(blob).hexdigest()[:16],
+        "magic_hex_16": blob[:16].hex(),
+        "detected_format": _detect_image_format(blob),
+    }
+
+
+def _probe_image_path(path):
+    info = {
+        "path": path,
+        "exists": os.path.exists(path),
+    }
+    if not info["exists"]:
+        return info
+
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    info.update(_summarize_bytes(raw))
+
+    try:
+        result = subprocess.run(
+            ["file", "-b", path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        info["file_cmd"] = result.stdout.strip() if result.returncode == 0 else result.stderr.strip()
+    except Exception as exc:
+        info["file_cmd_error"] = str(exc)
+
+    if Image is None:
+        info["pillow"] = "unavailable"
+        return info
+
+    try:
+        with Image.open(path) as img:
+            img.load()
+            info["pillow"] = {
+                "format": img.format,
+                "mode": img.mode,
+                "size": list(img.size),
+            }
+    except Exception as exc:
+        info["pillow_error"] = f"{type(exc).__name__}: {exc}"
+
+    return info
+
+
+def _preflight_loadimage_inputs(workflow):
+    load_nodes = _extract_loadimage_nodes(workflow)
+    checks = []
+    for node in load_nodes:
+        expected = node.get("expected_image")
+        if not isinstance(expected, str):
+            continue
+        path = os.path.join("/comfyui/input", expected)
+        probe = _probe_image_path(path)
+        checks.append({
+            "node_id": node.get("node_id"),
+            "expected_image": expected,
+            "probe": probe,
+        })
+    return checks
 
 
 def _safe_dict_keys(value):
@@ -362,45 +442,89 @@ def upload_images(images):
     print(f"worker-ltx-video - Uploading {len(images)} imagem(ns)...")
 
     for image in images:
+        blob = None
         try:
             name = image["name"]
             image_data_uri = image["image"]
             if "," in image_data_uri:
-                base64_data = image_data_uri.split(",", 1)[1]
+                base64_data = image_data_uri.split(",", 1)[1].strip()
             else:
-                base64_data = image_data_uri
+                base64_data = image_data_uri.strip()
 
             blob = base64.b64decode(base64_data)
-
-            # Valida o payload antes de enviar para o ComfyUI, quando Pillow estiver disponível.
-            if Image is not None:
-                with Image.open(BytesIO(blob)) as img:
-                    img.verify()
+            print(
+                "worker-ltx-video - Decoded image summary:",
+                json.dumps({"name": name, **_summarize_bytes(blob)}, ensure_ascii=False),
+            )
 
             input_dir = "/comfyui/input"
             os.makedirs(input_dir, exist_ok=True)
             dst_path = os.path.join(input_dir, name)
 
-            with open(dst_path, "wb") as fh:
-                fh.write(blob)
+            if Image is None:
+                with open(dst_path, "wb") as fh:
+                    fh.write(blob)
+            else:
+                with Image.open(BytesIO(blob)) as img:
+                    img.load()
+                    normalized = img
+                    if img.mode not in ("RGB", "RGBA"):
+                        normalized = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+                    with BytesIO() as buf:
+                        normalized.save(buf, format="PNG")
+                        normalized_blob = buf.getvalue()
+                with open(dst_path, "wb") as fh:
+                    fh.write(normalized_blob)
 
-            # Confirma que o arquivo salvo continua sendo uma imagem legível.
-            if Image is not None:
-                with Image.open(dst_path) as saved_img:
-                    saved_img.load()
+            probe = _probe_image_path(dst_path)
+            print(
+                "worker-ltx-video - Saved image probe:",
+                json.dumps({"name": name, "probe": probe}, ensure_ascii=False),
+            )
+            if probe.get("pillow_error"):
+                raise ValueError(f"imagem salva inválida: {probe['pillow_error']}")
 
-            responses.append(f"Saved OK: {name}")
-            print(f"worker-ltx-video - Saved OK: {name} -> {dst_path}")
+            file_size = os.path.getsize(dst_path)
+            responses.append(f"Saved OK: {name} ({file_size} bytes)")
         except Exception as e:
-            # Fallback para endpoint /upload/image caso a escrita direta falhe.
+            # Loga o erro ANTES de tentar o fallback
+            print(f"worker-ltx-video - Primary save FAILED ({type(e).__name__}): {e}")
+
+            # Fallback para endpoint /upload/image
+            if blob is None:
+                upload_errors.append(f"base64 decode falhou para {image.get('name', '?')}: {e}")
+                continue
             try:
+                detected_format = _detect_image_format(blob)
+                if detected_format == "jpeg":
+                    fallback_mime = "image/jpeg"
+                elif detected_format == "webp":
+                    fallback_mime = "image/webp"
+                elif detected_format == "gif":
+                    fallback_mime = "image/gif"
+                else:
+                    fallback_mime = "image/png"
+
                 files = {
-                    "image": (image.get("name", "input.png"), BytesIO(blob), "image/png"),
+                    "image": (image.get("name", "input.png"), BytesIO(blob), fallback_mime),
                     "overwrite": (None, "true"),
                 }
                 response = requests.post(f"http://{COMFY_HOST}/upload/image", files=files, timeout=30)
                 response.raise_for_status()
-                responses.append(f"Upload OK: {image.get('name', 'unknown')}")
+                fallback_resp = response.json() if response.content else {}
+
+                # Verifica se o arquivo realmente ficou acessível após o upload
+                dst_path = os.path.join("/comfyui/input", image.get("name", "input.png"))
+                if os.path.exists(dst_path):
+                    probe = _probe_image_path(dst_path)
+                    print(
+                        "worker-ltx-video - Fallback image probe:",
+                        json.dumps({"name": image.get("name"), "probe": probe, "response": fallback_resp}, ensure_ascii=False),
+                    )
+                else:
+                    print(f"worker-ltx-video - AVISO: fallback upload OK mas arquivo nao encontrado em {dst_path}. Resp: {fallback_resp}")
+
+                responses.append(f"Upload OK (fallback): {image.get('name', 'unknown')}")
                 print(f"worker-ltx-video - Upload OK (fallback): {image.get('name', 'unknown')}")
             except Exception as fallback_error:
                 error_msg = (
@@ -528,6 +652,24 @@ def handler(job):
                 "details": upload_result["details"],
                 "diagnostics": diagnostics,
             }
+        preflight_checks = _preflight_loadimage_inputs(workflow)
+        if preflight_checks:
+            print(
+                "worker-ltx-video - LoadImage preflight:",
+                json.dumps(preflight_checks, ensure_ascii=False),
+            )
+            invalid_checks = [
+                check for check in preflight_checks
+                if not check.get("probe", {}).get("exists")
+                or check.get("probe", {}).get("pillow_error")
+            ]
+            if invalid_checks:
+                diagnostics = _build_runtime_diagnostics(json.dumps(invalid_checks, ensure_ascii=False))
+                return {
+                    "error": "Imagem de entrada inválida antes do queue_workflow",
+                    "details": invalid_checks,
+                    "diagnostics": diagnostics,
+                }
 
     ws = None
     client_id = str(uuid.uuid4())
