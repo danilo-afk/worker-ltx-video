@@ -959,12 +959,16 @@ def handler(job):
                     else:
                         errors.append(f"Falha ao ler imagem {filename} via /view")
 
-            # Vídeos (VHS usa "gifs"; SaveVideo pode expor "videos")
+            # Vídeos (VHS usa "gifs"; SaveVideo pode expor "videos" ou "animated")
             video_entries = []
             if isinstance(node_output.get("gifs"), list):
                 video_entries.extend(node_output["gifs"])
             if isinstance(node_output.get("videos"), list):
                 video_entries.extend(node_output["videos"])
+            if isinstance(node_output.get("animated"), list):
+                video_entries.extend(node_output["animated"])
+            if isinstance(node_output.get("animated"), dict):
+                video_entries.append(node_output["animated"])
             if isinstance(node_output.get("video"), list):
                 video_entries.extend(node_output["video"])
             if isinstance(node_output.get("video"), dict):

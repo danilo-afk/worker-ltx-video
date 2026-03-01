@@ -32,7 +32,7 @@ if [ -d "$VOLUME" ]; then
   case "$CKPT_NAME" in
     ltx-2-19b-distilled.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled.safetensors"
-      CKPT_MIN=25000000000
+      CKPT_MIN=40000000000
       ;;
     ltx-2-19b-dev-fp8.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-dev-fp8.safetensors"
@@ -193,6 +193,8 @@ PY
       exit 1
     fi
   fi
+  CKPT_SIZE=$(stat -c%s "$CKPT" 2>/dev/null || stat -f%z "$CKPT" 2>/dev/null || echo "unknown")
+  echo "worker-ltx-video: checkpoint selecionado: $CKPT_NAME (${CKPT_SIZE} bytes)"
 
   # Compatibilidade com workflows antigos/oficiais que usam outros nomes de arquivo.
   # Se um checkpoint real já foi pré-carregado no volume, não sobrescreve com symlink.
