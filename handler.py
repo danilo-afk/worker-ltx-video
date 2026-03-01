@@ -16,6 +16,10 @@ import traceback
 import logging
 import subprocess
 import re
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 from network_volume import (
     is_network_volume_debug_enabled,
@@ -349,7 +353,7 @@ def check_server(url, retries=500, delay=50):
 
 
 def upload_images(images):
-    """Upload de imagens base64 para o ComfyUI."""
+    """Grava imagens decodificadas em /comfyui/input e usa upload HTTP apenas como fallback."""
     if not images:
         return {"status": "success", "message": "No images to upload", "details": []}
 
@@ -367,18 +371,44 @@ def upload_images(images):
                 base64_data = image_data_uri
 
             blob = base64.b64decode(base64_data)
-            files = {
-                "image": (name, BytesIO(blob), "image/png"),
-                "overwrite": (None, "true"),
-            }
-            response = requests.post(f"http://{COMFY_HOST}/upload/image", files=files, timeout=30)
-            response.raise_for_status()
-            responses.append(f"Upload OK: {name}")
-            print(f"worker-ltx-video - Upload OK: {name}")
+
+            # Valida o payload antes de enviar para o ComfyUI, quando Pillow estiver disponível.
+            if Image is not None:
+                with Image.open(BytesIO(blob)) as img:
+                    img.verify()
+
+            input_dir = "/comfyui/input"
+            os.makedirs(input_dir, exist_ok=True)
+            dst_path = os.path.join(input_dir, name)
+
+            with open(dst_path, "wb") as fh:
+                fh.write(blob)
+
+            # Confirma que o arquivo salvo continua sendo uma imagem legível.
+            if Image is not None:
+                with Image.open(dst_path) as saved_img:
+                    saved_img.load()
+
+            responses.append(f"Saved OK: {name}")
+            print(f"worker-ltx-video - Saved OK: {name} -> {dst_path}")
         except Exception as e:
-            error_msg = f"Erro no upload de {image.get('name', 'unknown')}: {e}"
-            print(f"worker-ltx-video - {error_msg}")
-            upload_errors.append(error_msg)
+            # Fallback para endpoint /upload/image caso a escrita direta falhe.
+            try:
+                files = {
+                    "image": (image.get("name", "input.png"), BytesIO(blob), "image/png"),
+                    "overwrite": (None, "true"),
+                }
+                response = requests.post(f"http://{COMFY_HOST}/upload/image", files=files, timeout=30)
+                response.raise_for_status()
+                responses.append(f"Upload OK: {image.get('name', 'unknown')}")
+                print(f"worker-ltx-video - Upload OK (fallback): {image.get('name', 'unknown')}")
+            except Exception as fallback_error:
+                error_msg = (
+                    f"Erro no upload de {image.get('name', 'unknown')}: primary={e}; "
+                    f"fallback={fallback_error}"
+                )
+                print(f"worker-ltx-video - {error_msg}")
+                upload_errors.append(error_msg)
 
     if upload_errors:
         return {"status": "error", "message": "Algumas imagens falharam", "details": upload_errors}
