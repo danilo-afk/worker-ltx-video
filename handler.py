@@ -38,6 +38,9 @@ MAX_INLINE_VIDEO_BYTES = int(os.environ.get("MAX_INLINE_VIDEO_BYTES", 4_000_000)
 COMFY_STARTUP_LOG = os.environ.get("COMFY_STARTUP_LOG", "/tmp/comfyui.log")
 WORKFLOW_EVENT_IDLE_TIMEOUT_S = int(os.environ.get("WORKFLOW_EVENT_IDLE_TIMEOUT_S", 180))
 GEMMA_NODE_IDLE_TIMEOUT_S = int(os.environ.get("GEMMA_NODE_IDLE_TIMEOUT_S", 900))
+CHECKPOINT_NODE_IDLE_TIMEOUT_S = int(os.environ.get("CHECKPOINT_NODE_IDLE_TIMEOUT_S", 1200))
+SAMPLER_NODE_IDLE_TIMEOUT_S = int(os.environ.get("SAMPLER_NODE_IDLE_TIMEOUT_S", 1800))
+DECODE_NODE_IDLE_TIMEOUT_S = int(os.environ.get("DECODE_NODE_IDLE_TIMEOUT_S", 900))
 
 if os.environ.get("WEBSOCKET_TRACE", "false").lower() == "true":
     websocket.enableTrace(True)
@@ -86,6 +89,18 @@ def _summarize_bytes(blob):
         "magic_hex_16": blob[:16].hex(),
         "detected_format": _detect_image_format(blob),
     }
+
+
+def _get_idle_timeout_for_node_class(node_class):
+    if node_class == "LTXVGemmaCLIPModelLoader":
+        return GEMMA_NODE_IDLE_TIMEOUT_S
+    if node_class == "CheckpointLoaderSimple":
+        return CHECKPOINT_NODE_IDLE_TIMEOUT_S
+    if node_class == "SamplerCustomAdvanced":
+        return SAMPLER_NODE_IDLE_TIMEOUT_S
+    if node_class == "LTXVSpatioTemporalTiledVAEDecode":
+        return DECODE_NODE_IDLE_TIMEOUT_S
+    return WORKFLOW_EVENT_IDLE_TIMEOUT_S
 
 
 def _probe_image_path(path):
@@ -818,12 +833,14 @@ def handler(job):
                             break
                         if data.get("prompt_id") == prompt_id:
                             current_node_id = str(data.get("node")) if data.get("node") is not None else None
+                            current_node_class = workflow_nodes.get(current_node_id, "unknown") if current_node_id else None
                             _log_ws_event(
                                 "Executing node",
                                 {
                                     "prompt_id": prompt_id,
                                     "node_id": current_node_id,
-                                    "class_type": workflow_nodes.get(current_node_id, "unknown") if current_node_id else None,
+                                    "class_type": current_node_class,
+                                    "idle_timeout_s": _get_idle_timeout_for_node_class(current_node_class),
                                 },
                             )
                             last_event_at = time.time()
@@ -877,7 +894,7 @@ def handler(job):
             except websocket.WebSocketTimeoutException:
                 idle_for = int(time.time() - last_event_at)
                 current_node_class = workflow_nodes.get(current_node_id, "unknown") if current_node_id else None
-                idle_limit = GEMMA_NODE_IDLE_TIMEOUT_S if current_node_class == "LTXVGemmaCLIPModelLoader" else WORKFLOW_EVENT_IDLE_TIMEOUT_S
+                idle_limit = _get_idle_timeout_for_node_class(current_node_class)
                 if idle_for >= idle_limit:
                     current_node_class = workflow_nodes.get(current_node_id, "unknown") if current_node_id else None
                     raise ValueError(
