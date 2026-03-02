@@ -287,6 +287,8 @@ PPEOF
 
   # Compatibilidade com o path do workflow oficial LTX-2 I2V.
   mkdir -p "$GEMMA_OFFICIAL_DIR"
+  ln -sf "gemma-3-fp8/model.safetensors" \
+    "$VOLUME/models/text_encoders/gemma_3_12B_it.safetensors"
   ln -sf "../gemma-3-fp8/model.safetensors" \
     "$GEMMA_OFFICIAL_DIR/model.safetensors"
   ln -sf "../gemma-3-fp8/model.safetensors" \
