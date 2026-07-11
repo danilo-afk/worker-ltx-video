@@ -1,0 +1,18 @@
+{
+  "title": "LTX-2.3 Video (worker-ltx-video)",
+  "description": "Geração de vídeo+áudio com LTX-2.3 22B (ComfyUI) em RunPod Serverless. Default fp8 distilled; pesos no network volume.",
+  "type": "serverless",
+  "category": "video",
+  "config": {
+    "runsOn": "GPU",
+    "cudaVersion": "12.6",
+    "allowedCudaVersions": ["12.9", "12.8", "12.7", "12.6"],
+    "gpuCount": 1,
+    "gpuIds": "AMPERE_80,ADA_48_PRO,AMPERE_48",
+    "containerDiskInGb": 30,
+    "env": [
+      { "key": "LTX_MODEL_VERSION", "value": "2.3" },
+      { "key": "LTX_CKPT_NAME", "value": "ltx-2.3-22b-distilled-fp8.safetensors" }
+    ]
+  }
+}
