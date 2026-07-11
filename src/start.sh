@@ -167,6 +167,35 @@ PY
     return 0
   }
 
+  # Download rápido via hf_hub_download + hf_transfer (100-200 MB/s vs ~13 MB/s do wget).
+  hf_fast_download() {
+    local file="$1" url="$2"
+    HF_HUB_ENABLE_HF_TRANSFER=1 python - "$file" "$url" <<'PYHF'
+import os, sys, shutil, tempfile
+file, url = sys.argv[1], sys.argv[2]
+try:
+    rest = url.split("huggingface.co/", 1)[1]
+    repo_part, path_part = rest.split("/resolve/", 1)
+    rev, filename = path_part.split("/", 1)
+except Exception as e:
+    print("worker-ltx-video: hf parse falhou:", e); sys.exit(3)
+try:
+    from huggingface_hub import hf_hub_download
+except Exception as e:
+    print("worker-ltx-video: huggingface_hub ausente:", e); sys.exit(4)
+tmp = tempfile.mkdtemp(dir=os.path.dirname(file) or "/tmp")
+try:
+    p = hf_hub_download(repo_id=repo_part, filename=filename, revision=rev, local_dir=tmp)
+    os.makedirs(os.path.dirname(file), exist_ok=True)
+    shutil.move(p, file)
+    print("worker-ltx-video: hf_transfer OK ->", file)
+except Exception as e:
+    print("worker-ltx-video: hf_hub_download falhou:", e); sys.exit(5)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+PYHF
+  }
+
   download_with_validation() {
     local file="$1" min="$2" url="$3" label="$4"
     local max_attempts=3
@@ -175,6 +204,12 @@ PY
       echo "worker-ltx-video: Baixando ${label} (tentativa ${attempt}/${max_attempts})..."
       mkdir -p "$(dirname "$file")"
       rm -f "$file"
+      # 1) rápido: hf_hub_download + hf_transfer
+      if hf_fast_download "$file" "$url" && check_size "$file" "$min"; then
+        return 0
+      fi
+      rm -f "$file"
+      # 2) fallback: wget (nunca fica pior que o método antigo)
       if wget --progress=dot:giga -O "$file" "$url" && check_size "$file" "$min"; then
         return 0
       fi
