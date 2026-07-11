@@ -92,13 +92,19 @@ def _summarize_bytes(blob):
 
 
 def _get_idle_timeout_for_node_class(node_class):
-    if node_class == "LTXVGemmaCLIPModelLoader":
+    # LTX-2 usa LTXVGemmaCLIPModelLoader; LTX-2.3 usa LTXAVTextEncoderLoader.
+    if node_class in ("LTXVGemmaCLIPModelLoader", "LTXAVTextEncoderLoader"):
         return GEMMA_NODE_IDLE_TIMEOUT_S
     if node_class == "CheckpointLoaderSimple":
         return CHECKPOINT_NODE_IDLE_TIMEOUT_S
     if node_class == "SamplerCustomAdvanced":
         return SAMPLER_NODE_IDLE_TIMEOUT_S
-    if node_class == "LTXVSpatioTemporalTiledVAEDecode":
+    # LTX-2 usa LTXVSpatioTemporalTiledVAEDecode; LTX-2.3 usa LTXVTiledVAEDecode/LTXVAudioVAEDecode.
+    if node_class in (
+        "LTXVSpatioTemporalTiledVAEDecode",
+        "LTXVTiledVAEDecode",
+        "LTXVAudioVAEDecode",
+    ):
         return DECODE_NODE_IDLE_TIMEOUT_S
     return WORKFLOW_EVENT_IDLE_TIMEOUT_S
 
