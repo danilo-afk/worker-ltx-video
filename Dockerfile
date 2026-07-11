@@ -65,8 +65,8 @@ ADD src/extra_model_paths.yaml ./
 
 WORKDIR /
 
-# Install Python runtime dependencies (hf_transfer p/ download rápido dos pesos)
-RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer
+# Install Python runtime dependencies (hf_transfer p/ download rápido; sqlalchemy/alembic exigidos pelo ComfyUI latest)
+RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer sqlalchemy alembic
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./

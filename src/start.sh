@@ -523,12 +523,12 @@ print_gpu_snapshot
 wait_for_gpu_ready
 
 if [ "$SERVE_API_LOCALLY" == "true" ]; then
-    start_comfy_supervisor --disable-auto-launch --disable-metadata --listen --verbose "${COMFY_LOG_LEVEL}" --log-stdout
+    start_comfy_supervisor --disable-auto-launch --disable-metadata --lowvram --listen --verbose "${COMFY_LOG_LEVEL}" --log-stdout
 
     echo "worker-ltx-video: Starting RunPod Handler"
     python -u /handler.py --rp_serve_api --rp_api_host=0.0.0.0
 else
-    start_comfy_supervisor --disable-auto-launch --disable-metadata --verbose "${COMFY_LOG_LEVEL}" --log-stdout
+    start_comfy_supervisor --disable-auto-launch --disable-metadata --lowvram --verbose "${COMFY_LOG_LEVEL}" --log-stdout
 
     echo "worker-ltx-video: Starting RunPod Handler"
     python -u /handler.py
