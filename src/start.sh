@@ -25,13 +25,21 @@ if [ -d "$VOLUME" ]; then
     echo "worker-ltx-video: flock não encontrado; bootstrap seguirá sem lock" >&2
   fi
 
+  # Versão do modelo: 2.3 (LTX-2.3 22B, default) ou 2.0 (LTX-2 19B, legado).
+  # A mesma imagem serve os dois endpoints; o endpoint escolhe via env.
+  LTX_MODEL_VERSION="${LTX_MODEL_VERSION:-2.3}"
+  echo "worker-ltx-video: LTX_MODEL_VERSION=$LTX_MODEL_VERSION"
+
   # Default serverless: FP8 para bootstrap rápido e evitar worker unhealthy por cold-start longo.
-  # Para usar o checkpoint oficial completo, defina:
-  #   LTX_CKPT_NAME=ltx-2-19b-distilled.safetensors
-  # Para reaproveitar um checkpoint full já enviado ao volume sob um nome temporário:
-  #   LTX_CKPT_NAME=ltx-2-19b-distilled.full-43285058186.safetensors
-  CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled-fp8.safetensors}"
+  # Para usar o checkpoint full, defina LTX_CKPT_NAME (ex.: ltx-2.3-22b-distilled-1.1.safetensors).
+  if [ "$LTX_MODEL_VERSION" = "2.0" ]; then
+    CKPT_NAME="${LTX_CKPT_NAME:-ltx-2-19b-distilled-fp8.safetensors}"
+  else
+    CKPT_NAME="${LTX_CKPT_NAME:-ltx-2.3-22b-distilled-fp8.safetensors}"
+  fi
+
   case "$CKPT_NAME" in
+    # ===== LTX-2 (19B) — legado =====
     ltx-2-19b-distilled.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled.safetensors"
       CKPT_MIN=40000000000
@@ -47,6 +55,23 @@ if [ -d "$VOLUME" ]; then
     ltx-2-19b-distilled-fp8.safetensors)
       CKPT_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-fp8.safetensors"
       CKPT_MIN=8500000000
+      ;;
+    # ===== LTX-2.3 (22B) — atual =====
+    ltx-2.3-22b-distilled-fp8.safetensors)
+      CKPT_URL="https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-distilled-fp8.safetensors"
+      CKPT_MIN=27000000000
+      ;;
+    ltx-2.3-22b-dev-fp8.safetensors)
+      CKPT_URL="https://huggingface.co/Lightricks/LTX-2.3-fp8/resolve/main/ltx-2.3-22b-dev-fp8.safetensors"
+      CKPT_MIN=27000000000
+      ;;
+    ltx-2.3-22b-distilled-1.1.safetensors)
+      CKPT_URL="https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-1.1.safetensors"
+      CKPT_MIN=43000000000
+      ;;
+    ltx-2.3-22b-dev.safetensors)
+      CKPT_URL="https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-dev.safetensors"
+      CKPT_MIN=43000000000
       ;;
     *)
       echo "worker-ltx-video: LTX_CKPT_NAME inválido: $CKPT_NAME" >&2
@@ -227,7 +252,12 @@ PY
     ln -sfn "$alias_target" "$alias_path"
   }
 
-  ensure_checkpoint_alias "ltx-2-19b-distilled.safetensors" "$CKPT_NAME" "$CKPT_MIN"
+  # Alias com o nome canônico que o workflow oficial pede (varia por versão).
+  if [ "$LTX_MODEL_VERSION" = "2.0" ]; then
+    ensure_checkpoint_alias "ltx-2-19b-distilled.safetensors" "$CKPT_NAME" "$CKPT_MIN"
+  else
+    ensure_checkpoint_alias "ltx-2.3-22b-distilled-1.1.safetensors" "$CKPT_NAME" "$CKPT_MIN"
+  fi
 
   # Marker para forçar re-download quando fonte muda
   GEMMA_MARKER="$GEMMA_DIR/.source-comfy-org-fp8-scaled"
@@ -308,10 +338,26 @@ PPEOF
   ln -sf "../gemma-3-fp8/preprocessor_config.json" \
     "$GEMMA_OFFICIAL_DIR/preprocessor_config.json"
 
+  # Auxiliares (LoRA + upscalers) variam por versão.
+  if [ "$LTX_MODEL_VERSION" = "2.0" ]; then
+    LORA_NAME="ltx-2-19b-distilled-lora-384.safetensors"
+    LORA_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
+    SPATIAL_NAME="ltx-2-spatial-upscaler-x2-1.0.safetensors"
+    SPATIAL_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+    TEMPORAL_NAME=""
+    TEMPORAL_URL=""
+  else
+    LORA_NAME="ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
+    LORA_URL="https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
+    SPATIAL_NAME="ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
+    SPATIAL_URL="https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
+    TEMPORAL_NAME="ltx-2.3-temporal-upscaler-x2-1.0.safetensors"
+    TEMPORAL_URL="https://huggingface.co/Lightricks/LTX-2.3/resolve/main/ltx-2.3-temporal-upscaler-x2-1.0.safetensors"
+  fi
+
   # Distilled LoRA (melhora qualidade com modelo dev)
-  LORA="$VOLUME/models/loras/ltx-2-19b-distilled-lora-384.safetensors"
+  LORA="$VOLUME/models/loras/$LORA_NAME"
   LORA_MIN=1000000
-  LORA_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-19b-distilled-lora-384.safetensors"
   if ! check_size "$LORA" "$LORA_MIN"; then
     if ! download_with_validation "$LORA" "$LORA_MIN" "$LORA_URL" "Distilled LoRA"; then
       exit 1
@@ -319,19 +365,28 @@ PPEOF
   fi
 
   # Spatial Upscaler 2x (para pipeline de 2 estágios)
-  UPSCALER="$VOLUME/models/latent_upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+  UPSCALER="$VOLUME/models/latent_upscale_models/$SPATIAL_NAME"
   UPSCALER_MIN=1000000
-  UPSCALER_URL="https://huggingface.co/Lightricks/LTX-2/resolve/main/ltx-2-spatial-upscaler-x2-1.0.safetensors"
   if ! check_size "$UPSCALER" "$UPSCALER_MIN"; then
-    if ! download_with_validation "$UPSCALER" "$UPSCALER_MIN" "$UPSCALER_URL" "Spatial Upscaler 2x"; then
+    if ! download_with_validation "$UPSCALER" "$UPSCALER_MIN" "$SPATIAL_URL" "Spatial Upscaler 2x"; then
       exit 1
+    fi
+  fi
+
+  # Temporal Upscaler 2x (só LTX-2.3; opcional para pipeline temporal)
+  if [ -n "$TEMPORAL_NAME" ]; then
+    TEMPORAL="$VOLUME/models/latent_upscale_models/$TEMPORAL_NAME"
+    if ! check_size "$TEMPORAL" "$UPSCALER_MIN"; then
+      if ! download_with_validation "$TEMPORAL" "$UPSCALER_MIN" "$TEMPORAL_URL" "Temporal Upscaler 2x"; then
+        exit 1
+      fi
     fi
   fi
 
   # Compatibilidade com caminhos legados
   mkdir -p "$VOLUME/models/upscale_models"
-  ln -sf "../latent_upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors" \
-    "$VOLUME/models/upscale_models/ltx-2-spatial-upscaler-x2-1.0.safetensors"
+  ln -sf "../latent_upscale_models/$SPATIAL_NAME" \
+    "$VOLUME/models/upscale_models/$SPATIAL_NAME"
 
   echo "worker-ltx-video: Modelos prontos no volume!"
 else
