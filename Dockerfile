@@ -65,8 +65,10 @@ ADD src/extra_model_paths.yaml ./
 
 WORKDIR /
 
-# Install Python runtime dependencies (hf_transfer p/ download rápido; sqlalchemy/alembic exigidos pelo ComfyUI latest)
-RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer sqlalchemy alembic
+# Install Python runtime dependencies (hf_transfer p/ download rápido; sqlalchemy/alembic/Pillow exigidos pelo ComfyUI latest)
+RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer sqlalchemy alembic Pillow
+# Garante TODAS as deps do ComfyUI no venv de runtime (/opt/venv) — evita whack-a-mole de módulos faltando (PIL, etc.)
+RUN uv pip install -r /comfyui/requirements.txt
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
