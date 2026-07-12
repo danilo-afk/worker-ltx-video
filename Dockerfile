@@ -65,12 +65,13 @@ ADD src/extra_model_paths.yaml ./
 
 WORKDIR /
 
-# Install Python runtime dependencies (hf_transfer + deps já confirmadas faltando)
-RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer \
-    sqlalchemy alembic Pillow blake3
-# comfy-aimdo/comfy-kitchen (pacotes novos do ComfyUI latest) com --no-deps: NÃO reinstalam torch
-# (torch/numpy já presentes do `comfy install --nvidia`; instalar com deps conflita e quebra o build).
-RUN uv pip install --no-deps comfy-aimdo==0.4.10 comfy-kitchen==0.2.18
+# Install Python runtime dependencies (hf_transfer p/ download rápido dos pesos)
+RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer
+# comfy-cli não puxa o requirements.txt COMPLETO do ComfyUI → deps novas (sqlalchemy, PIL, comfy_aimdo, etc.)
+# faltam e o ComfyUI crasha na subida. Instalar com pip NORMAL (não `uv pip`, não `--no-deps`): mantém o
+# torch CUDA já instalado pelo `comfy install --nvidia` (linha `torch` sem versão = satisfeita, não reinstala).
+# Abordagem do worker 10eros (LTX-2.3 provado).
+RUN if [ -f /comfyui/requirements.txt ]; then /opt/venv/bin/pip install -q --root-user-action=ignore -r /comfyui/requirements.txt; fi
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
