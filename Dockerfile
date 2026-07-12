@@ -92,17 +92,26 @@ ENV PIP_NO_INPUT=1
 COPY scripts/comfy-manager-set-mode.sh /usr/local/bin/comfy-manager-set-mode
 RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 
-# ============ ComfyUI-LTXVideo ============
-# Custom node para geração de vídeo com LTX-2
+# ============ Custom nodes: forks PRÓPRIOS pinados por commit ============
+# Forkados p/ danilo-afk (não depender do HEAD de terceiros — evita quebra por
+# breaking change/rename/deleção upstream). Atualizar = bumpar o SHA aqui.
+
+# ComfyUI-LTXVideo (fork de Lightricks) — geração de vídeo LTX-2/2.3 + IC-LoRA
 RUN cd /comfyui/custom_nodes && \
-    git clone https://github.com/Lightricks/ComfyUI-LTXVideo.git && \
-    cd ComfyUI-LTXVideo && \
+    git clone https://github.com/danilo-afk/ComfyUI-LTXVideo.git && \
+    cd ComfyUI-LTXVideo && git checkout aceeae9635f6d493f2893ba3c411a1c36031788a && \
     uv pip install --no-cache-dir -r requirements.txt
 
-# VideoHelperSuite (VHS) - output de vídeo (VHS_VideoCombine)
+# VideoHelperSuite (fork de Kosinkadink) — output de vídeo (VHS_VideoCombine)
 RUN cd /comfyui/custom_nodes && \
-    git clone https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git && \
-    cd ComfyUI-VideoHelperSuite && \
+    git clone https://github.com/danilo-afk/ComfyUI-VideoHelperSuite.git && \
+    cd ComfyUI-VideoHelperSuite && git checkout 4ee72c065db22c9d96c2427954dc69e7b908444b && \
+    uv pip install --no-cache-dir -r requirements.txt
+
+# KJNodes (fork de kijai) — utilitários (ResizeImageMaskNode, GetImageSize) do workflow IC-LoRA
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/danilo-afk/ComfyUI-KJNodes.git && \
+    cd ComfyUI-KJNodes && git checkout e27a505b3ba6ce42687fe00500deda103d9d6071 && \
     uv pip install --no-cache-dir -r requirements.txt
 
 # Compat: node utilitário usado em workflows oficiais LTX-2

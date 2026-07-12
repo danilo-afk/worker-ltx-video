@@ -399,6 +399,18 @@ PPEOF
     fi
   fi
 
+  # IC-LoRA Ingredients (referência de conteúdo por N imagens — caminho B). Só 2.3.
+  # ~1,3GB; usado pelo template iclora (LTXICLoRALoaderModelOnly). Best-effort: se
+  # falhar, o worker sobe mesmo assim (só o modo iclora fica indisponível).
+  if [ "$LTX_MODEL_VERSION" != "2.0" ]; then
+    ICLORA="$VOLUME/models/loras/ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors"
+    ICLORA_URL="https://huggingface.co/Lightricks/LTX-2.3-22b-IC-LoRA-Ingredients/resolve/main/ltx-2.3-22b-ic-lora-ingredients-0.9.safetensors"
+    if ! check_size "$ICLORA" 1000000; then
+      download_with_validation "$ICLORA" 1000000 "$ICLORA_URL" "IC-LoRA Ingredients" || \
+        echo "worker-ltx-video: IC-LoRA Ingredients indisponível (modo iclora desabilitado)"
+    fi
+  fi
+
   # Spatial Upscaler 2x (para pipeline de 2 estágios)
   UPSCALER="$VOLUME/models/latent_upscale_models/$SPATIAL_NAME"
   UPSCALER_MIN=1000000
