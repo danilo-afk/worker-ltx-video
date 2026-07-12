@@ -65,13 +65,13 @@ ADD src/extra_model_paths.yaml ./
 
 WORKDIR /
 
-# Install Python runtime dependencies (hf_transfer p/ download rápido)
-RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer sqlalchemy alembic Pillow blake3
-# Deps do ComfyUI latest (comfy_aimdo, etc.) no venv de runtime, EXCLUINDO torch/torchvision/torchaudio
-# (o `comfy install --nvidia` já instalou o torch CUDA correto; reinstalar quebra a GPU → worker unhealthy).
+# Install Python runtime dependencies + deps novas do ComfyUI latest que o `comfy install` não põe no venv
+# (sqlalchemy/alembic/Pillow/blake3 já confirmados; comfy-aimdo/comfy-kitchen = pacotes novos NVIDIA do ComfyUI).
+RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer \
+    sqlalchemy alembic Pillow blake3 comfy-aimdo==0.4.10 comfy-kitchen==0.2.18
+# Best-effort: instala o resto das deps do ComfyUI (frontend/templates/etc.) SEM torch e SEM falhar o build.
 RUN grep -ivE '^[[:space:]]*(torch|torchvision|torchaudio|torchsde)([][=<>!~; [:space:]]|$)' /comfyui/requirements.txt > /tmp/creqs.txt \
-    && echo "=== deps ComfyUI a instalar (sem torch) ===" && cat /tmp/creqs.txt \
-    && uv pip install -r /tmp/creqs.txt
+    && (uv pip install -r /tmp/creqs.txt || echo "worker-ltx-video: aviso - parte do requirements falhou (best-effort, deps críticas já instaladas acima)")
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
