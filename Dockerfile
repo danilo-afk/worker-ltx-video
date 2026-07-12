@@ -65,9 +65,13 @@ ADD src/extra_model_paths.yaml ./
 
 WORKDIR /
 
-# Install Python runtime dependencies (hf_transfer p/ download rápido; sqlalchemy/alembic/Pillow exigidos pelo ComfyUI latest)
-# NÃO reinstalar -r requirements.txt do ComfyUI: reinstala torch (versão errada) e quebra a GPU. Só as deps confirmadas faltando.
+# Install Python runtime dependencies (hf_transfer p/ download rápido)
 RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer sqlalchemy alembic Pillow blake3
+# Deps do ComfyUI latest (comfy_aimdo, etc.) no venv de runtime, EXCLUINDO torch/torchvision/torchaudio
+# (o `comfy install --nvidia` já instalou o torch CUDA correto; reinstalar quebra a GPU → worker unhealthy).
+RUN grep -ivE '^[[:space:]]*(torch|torchvision|torchaudio|torchsde)([][=<>!~; [:space:]]|$)' /comfyui/requirements.txt > /tmp/creqs.txt \
+    && echo "=== deps ComfyUI a instalar (sem torch) ===" && cat /tmp/creqs.txt \
+    && uv pip install -r /tmp/creqs.txt
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
