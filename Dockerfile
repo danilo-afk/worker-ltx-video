@@ -66,9 +66,8 @@ ADD src/extra_model_paths.yaml ./
 WORKDIR /
 
 # Install Python runtime dependencies (hf_transfer p/ download rápido; sqlalchemy/alembic/Pillow exigidos pelo ComfyUI latest)
-RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer sqlalchemy alembic Pillow
-# Garante TODAS as deps do ComfyUI no venv de runtime (/opt/venv) — evita whack-a-mole de módulos faltando (PIL, etc.)
-RUN uv pip install -r /comfyui/requirements.txt
+# NÃO reinstalar -r requirements.txt do ComfyUI: reinstala torch (versão errada) e quebra a GPU. Só as deps confirmadas faltando.
+RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer]" hf_transfer sqlalchemy alembic Pillow blake3
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
