@@ -676,11 +676,15 @@ def _build_msr(job_input, inj, images, prompt):
         wf[inj["background"]]["inputs"]["image"] = "bg.png"
         upload.append({"name": "bg.png", "image": plate})
 
-    # PromptRelay: global (contexto/cena) + local (ação do segmento). Um prompt do node
-    # alimenta ambos (segmento único); local NÃO pode ser vazio (nó exige >=1).
+    # PromptRelay: global ancora os sujeitos numa ÚNICA cena compartilhada (senão o MSR
+    # tende a um split-screen, cada sujeito no seu contexto de referência); local = ação
+    # do segmento (não pode ser vazio; nó exige >=1). Prefixa diretiva de unificação.
     pr = inj["prompt_relay"]
     if prompt and pr in wf:
-        wf[pr]["inputs"]["global_prompt"] = prompt
+        wf[pr]["inputs"]["global_prompt"] = (
+            "the subjects together in the same single frame, one shared scene, "
+            "one continuous cinematic shot. " + prompt
+        )
         wf[pr]["inputs"]["local_prompts"] = prompt
     neg = job_input.get("negative_prompt")
 
