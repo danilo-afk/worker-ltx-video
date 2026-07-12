@@ -72,6 +72,9 @@ RUN uv pip install runpod requests websocket-client "huggingface_hub[hf_transfer
 # torch CUDA já instalado pelo `comfy install --nvidia` (linha `torch` sem versão = satisfeita, não reinstala).
 # Abordagem do worker 10eros (LTX-2.3 provado).
 RUN if [ -f /comfyui/requirements.txt ]; then /opt/venv/bin/pip install -q --root-user-action=ignore -r /comfyui/requirements.txt; fi
+# O requirements.txt (torch sem versão) puxa um torch de CUDA nova demais p/ o driver da GPU do RunPod
+# (RTX 4090 driver 12.8 = 12080 → "NVIDIA driver too old" / CUDA init failed). Força torch p/ CUDA 12.6 (compatível).
+RUN uv pip install --force-reinstall torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
