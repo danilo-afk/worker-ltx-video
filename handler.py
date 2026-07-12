@@ -478,9 +478,24 @@ def _has_output_node(workflow):
 WORKFLOWS_DIR = os.environ.get("LTX_WORKFLOWS_DIR", "/workflows")
 # Pontos de injeção por template (nó do prompt positivo/negativo + LoadImage no i2v).
 _TEMPLATE_INJECT = {
-    "t2v": {"file": "ltx23_t2v.json", "positive": "92:3", "negative": "92:4", "load_image": None},
-    "i2v": {"file": "ltx23_i2v.json", "positive": "153:132", "negative": "153:123", "load_image": "153:124"},
+    "t2v": {"file": "ltx23_t2v.json", "positive": "92:3", "negative": "92:4", "load_image": None,
+            "length": "92:62", "fps": 24, "preprocess": None},
+    "i2v": {"file": "ltx23_i2v.json", "positive": "153:132", "negative": "153:123", "load_image": "153:124",
+            "length": "153:125", "fps": 24, "preprocess": "i2v:preprocess"},
 }
+
+# LTX exige nº de frames no formato 8n+1. Teto p/ caber na VRAM (RTX 4090 24GB, 22B
+# + upscaler 2-stage). Override por env LTX_MAX_FRAMES (0 = sem teto).
+_LTX_MAX_FRAMES = int(os.environ.get("LTX_MAX_FRAMES", "241") or 241)
+
+
+def _snap_frames(frames, cap):
+    """Ajusta p/ 8n+1 (exigência do latente LTX) e aplica teto de VRAM."""
+    frames = max(9, int(frames))
+    if cap:
+        frames = min(frames, cap)
+    n = max(1, round((frames - 1) / 8))
+    return n * 8 + 1
 
 
 def _url_to_data_uri(url):
@@ -523,6 +538,25 @@ def build_workflow_from_prompt(job_input):
         wf[inj["negative"]]["inputs"]["text"] = neg
     if kind == "i2v" and inj["load_image"] in wf and images:
         wf[inj["load_image"]]["inputs"]["image"] = images[0]["name"]
+
+    # Duração do node -> nº de frames (LTX = 8n+1). `duration`/`duration_seconds` (s) tem
+    # prioridade; `num_frames` é o override direto. Sem nenhum, mantém o default do template.
+    fps = inj.get("fps") or 24
+    frames = None
+    if job_input.get("num_frames"):
+        frames = int(job_input["num_frames"])
+    elif job_input.get("duration") or job_input.get("duration_seconds"):
+        secs = float(job_input.get("duration") or job_input.get("duration_seconds"))
+        frames = round(secs * fps)
+    if frames and inj.get("length") and inj["length"] in wf:
+        snapped = _snap_frames(frames, _LTX_MAX_FRAMES)
+        wf[inj["length"]]["inputs"]["value"] = snapped
+        print(f"worker-ltx-video - duração: pedido={frames}f -> aplicado={snapped}f (~{snapped/fps:.1f}s @ {fps}fps)")
+
+    # Movimento: img_compression maior solta o modelo da imagem de entrada (i2v).
+    comp = job_input.get("img_compression")
+    if comp and inj.get("preprocess") and inj["preprocess"] in wf:
+        wf[inj["preprocess"]]["inputs"]["img_compression"] = int(comp)
 
     print(f"worker-ltx-video - modo-prompt: {kind} | imagens={len(images)} | prompt={prompt[:60]!r}")
     return wf, images
