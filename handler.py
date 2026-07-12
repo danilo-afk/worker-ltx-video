@@ -517,6 +517,34 @@ def _resize_cover(data_uri, w, h):
         print(f"worker-ltx-video - resize_cover falhou ({e}); usando imagem original")
         return data_uri
 
+
+# Teto do lado maior da imagem i2v QUANDO não há aspect_ratio (a resolução deriva
+# da imagem × 0.5 × upscale ×2 = tamanho original; imagem grande → 193 frames em alta
+# res → estoura executionTimeout/VRAM). Preserva o aspecto, só reduz. Múltiplo de 32.
+_LTX_MAX_LONGSIDE = int(os.environ.get("LTX_MAX_LONGSIDE", "1280") or 1280)
+
+
+def _cap_longside(data_uri, cap):
+    """Reduz a imagem se o lado maior passa de `cap` (preserva aspecto). Sem PIL, no-op."""
+    if Image is None or cap <= 0:
+        return data_uri
+    try:
+        b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
+        im = Image.open(BytesIO(base64.b64decode(b64))).convert("RGB")
+        sw, sh = im.size
+        if max(sw, sh) <= cap:
+            return data_uri
+        scale = cap / max(sw, sh)
+        nw, nh = (round(sw * scale) // 32) * 32 or 32, (round(sh * scale) // 32) * 32 or 32
+        im = im.resize((nw, nh), Image.LANCZOS)
+        out = BytesIO()
+        im.save(out, format="PNG")
+        print(f"worker-ltx-video - i2v sem aspect: cap {sw}x{sh} -> {nw}x{nh}")
+        return "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()
+    except Exception as e:
+        print(f"worker-ltx-video - cap_longside falhou ({e}); usando imagem original")
+        return data_uri
+
 # LTX exige nº de frames no formato 8n+1. Teto p/ caber na VRAM (RTX 4090 24GB, 22B
 # + upscaler 2-stage). Override por env LTX_MAX_FRAMES (0 = sem teto).
 _LTX_MAX_FRAMES = int(os.environ.get("LTX_MAX_FRAMES", "241") or 241)
@@ -581,6 +609,10 @@ def build_workflow_from_prompt(job_input):
         elif kind == "i2v" and images:
             images[0]["image"] = _resize_cover(images[0]["image"], w, h)
             print(f"worker-ltx-video - aspect {aspect} -> i2v resize cover {w}x{h}")
+    elif kind == "i2v" and images:
+        # Sem aspect_ratio: a resolução deriva da imagem — limita o lado maior p/ não
+        # estourar timeout/VRAM com imagem grande (mantém o aspecto da imagem).
+        images[0]["image"] = _cap_longside(images[0]["image"], _LTX_MAX_LONGSIDE)
 
     if kind == "i2v" and inj["load_image"] in wf and images:
         wf[inj["load_image"]]["inputs"]["image"] = images[0]["name"]
