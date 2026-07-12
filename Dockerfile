@@ -78,6 +78,8 @@ RUN uv pip install --force-reinstall torch torchvision torchaudio --index-url ht
 
 # Add application code and scripts
 ADD src/start.sh src/network_volume.py handler.py test_input.json ./
+# Templates de workflow LTX-2.3 (T2V/I2V) usados pelo modo-prompt do handler
+COPY src/workflows /workflows
 RUN chmod +x /start.sh
 
 # Add script to install custom nodes

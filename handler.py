@@ -475,6 +475,59 @@ def _has_output_node(workflow):
     return False
 
 
+WORKFLOWS_DIR = os.environ.get("LTX_WORKFLOWS_DIR", "/workflows")
+# Pontos de injeção por template (nó do prompt positivo/negativo + LoadImage no i2v).
+_TEMPLATE_INJECT = {
+    "t2v": {"file": "ltx23_t2v.json", "positive": "92:3", "negative": "92:4", "load_image": None},
+    "i2v": {"file": "ltx23_i2v.json", "positive": "153:132", "negative": "153:123", "load_image": "153:124"},
+}
+
+
+def _url_to_data_uri(url):
+    """Baixa uma URL http(s) e devolve data URI base64 (para input.images)."""
+    resp = requests.get(url, timeout=180)
+    resp.raise_for_status()
+    ct = resp.headers.get("Content-Type", "image/png").split(";")[0]
+    return f"data:{ct};base64," + base64.b64encode(resp.content).decode()
+
+
+def build_workflow_from_prompt(job_input):
+    """Modo-prompt: monta o workflow LTX a partir de {prompt, images/image_urls, params}.
+
+    0 imagens -> T2V; 1+ imagens -> I2V (1ª imagem = primeiro frame). Espelha o padrão do
+    kiara_new: seleciona o template pelo nº de imagens e injeta prompt/imagem.
+    Retorna (workflow, images) onde images = [{name, image(base64)}] p/ upload.
+    """
+    prompt = (job_input.get("prompt") or "").strip()
+
+    # Normaliza imagens: aceita `images` [{name,image}] OU `image_urls`/`reference_images` (URLs).
+    images = list(job_input.get("images") or [])
+    urls = job_input.get("image_urls") or job_input.get("reference_images") or []
+    if isinstance(urls, str):
+        urls = [urls]
+    for i, u in enumerate(urls):
+        if not u:
+            continue
+        images.append({"name": f"ref_{i}.png", "image": _url_to_data_uri(u)})
+
+    kind = "i2v" if images else "t2v"
+    inj = _TEMPLATE_INJECT[kind]
+    path = os.path.join(WORKFLOWS_DIR, inj["file"])
+    with open(path) as f:
+        wf = json.load(f)
+
+    if prompt and inj["positive"] in wf:
+        wf[inj["positive"]]["inputs"]["text"] = prompt
+    neg = job_input.get("negative_prompt")
+    if neg and inj["negative"] in wf:
+        wf[inj["negative"]]["inputs"]["text"] = neg
+    if kind == "i2v" and inj["load_image"] in wf and images:
+        wf[inj["load_image"]]["inputs"]["image"] = images[0]["name"]
+
+    print(f"worker-ltx-video - modo-prompt: {kind} | imagens={len(images)} | prompt={prompt[:60]!r}")
+    return wf, images
+
+
 def validate_input(job_input):
     """Valida input do job."""
     if job_input is None:
@@ -487,6 +540,17 @@ def validate_input(job_input):
             return None, "Invalid JSON format in input"
 
     workflow = job_input.get("workflow")
+    # Modo-prompt: sem `workflow` mas com `prompt` (ou imagens) → constrói o workflow LTX.
+    if workflow is None and (job_input.get("prompt") or job_input.get("images") or job_input.get("image_urls") or job_input.get("reference_images")):
+        try:
+            workflow, built_images = build_workflow_from_prompt(job_input)
+            if job_input.get("images") is None:
+                job_input["images"] = built_images
+            else:
+                job_input["images"] = built_images
+        except Exception as e:
+            return None, f"Falha ao montar workflow do prompt: {e}"
+
     if workflow is None:
         return None, "Missing 'workflow' parameter"
     if not _has_output_node(workflow):
