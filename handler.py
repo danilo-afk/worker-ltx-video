@@ -479,10 +479,43 @@ WORKFLOWS_DIR = os.environ.get("LTX_WORKFLOWS_DIR", "/workflows")
 # Pontos de injeção por template (nó do prompt positivo/negativo + LoadImage no i2v).
 _TEMPLATE_INJECT = {
     "t2v": {"file": "ltx23_t2v.json", "positive": "92:3", "negative": "92:4", "load_image": None,
-            "length": "92:62", "fps": 24, "preprocess": None},
+            "length": "92:62", "fps": 24, "preprocess": None, "empty_image": "92:89"},
     "i2v": {"file": "ltx23_i2v.json", "positive": "153:132", "negative": "153:123", "load_image": "153:124",
-            "length": "153:125", "fps": 24, "preprocess": "i2v:preprocess"},
+            "length": "153:125", "fps": 24, "preprocess": "i2v:preprocess", "empty_image": None},
 }
+
+# aspect_ratio (node) -> (W, H) na mesma classe de área (~921k px), múltiplos de 32.
+# t2v: seta o EmptyImage (fonte de resolução). i2v: redimensiona a imagem de entrada
+# (cover, sem distorção) — a resolução do vídeo deriva dela via GetImageSize.
+_ASPECT_WH = {
+    "16:9": (1280, 720),
+    "9:16": (720, 1280),
+    "1:1": (960, 960),
+    "4:3": (1088, 816),
+    "3:4": (816, 1088),
+}
+
+
+def _resize_cover(data_uri, w, h):
+    """Redimensiona a imagem (data URI) p/ (w,h) em modo COVER (escala + crop central),
+    sem distorcer o aspecto. Sem PIL, devolve a original."""
+    if Image is None:
+        return data_uri
+    try:
+        b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
+        im = Image.open(BytesIO(base64.b64decode(b64))).convert("RGB")
+        sw, sh = im.size
+        scale = max(w / sw, h / sh)
+        nw, nh = max(w, round(sw * scale)), max(h, round(sh * scale))
+        im = im.resize((nw, nh), Image.LANCZOS)
+        left, top = (nw - w) // 2, (nh - h) // 2
+        im = im.crop((left, top, left + w, top + h))
+        out = BytesIO()
+        im.save(out, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()
+    except Exception as e:
+        print(f"worker-ltx-video - resize_cover falhou ({e}); usando imagem original")
+        return data_uri
 
 # LTX exige nº de frames no formato 8n+1. Teto p/ caber na VRAM (RTX 4090 24GB, 22B
 # + upscaler 2-stage). Override por env LTX_MAX_FRAMES (0 = sem teto).
@@ -536,6 +569,19 @@ def build_workflow_from_prompt(job_input):
     neg = job_input.get("negative_prompt")
     if neg and inj["negative"] in wf:
         wf[inj["negative"]]["inputs"]["text"] = neg
+    # Aspect_ratio do node -> resolução (t2v: EmptyImage; i2v: resize cover da imagem).
+    aspect = (job_input.get("aspect_ratio") or "").strip()
+    wh = _ASPECT_WH.get(aspect)
+    if wh:
+        w, h = wh
+        if kind == "t2v" and inj.get("empty_image") and inj["empty_image"] in wf:
+            wf[inj["empty_image"]]["inputs"]["width"] = w
+            wf[inj["empty_image"]]["inputs"]["height"] = h
+            print(f"worker-ltx-video - aspect {aspect} -> t2v {w}x{h}")
+        elif kind == "i2v" and images:
+            images[0]["image"] = _resize_cover(images[0]["image"], w, h)
+            print(f"worker-ltx-video - aspect {aspect} -> i2v resize cover {w}x{h}")
+
     if kind == "i2v" and inj["load_image"] in wf and images:
         wf[inj["load_image"]]["inputs"]["image"] = images[0]["name"]
 
