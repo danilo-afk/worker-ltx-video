@@ -409,6 +409,15 @@ PPEOF
       download_with_validation "$ICLORA" 1000000 "$ICLORA_URL" "IC-LoRA Ingredients" || \
         echo "worker-ltx-video: IC-LoRA Ingredients indisponível (modo iclora desabilitado)"
     fi
+
+    # MSR LoRA (Multi-Subject Reference — N imagens SEPARADAS -> vídeo). ~0,65GB,
+    # NÃO-gated. Usada pelo template msr (LiconMSR + LTXICLoRALoaderModelOnly).
+    MSR="$VOLUME/models/loras/LTX-2.3-Licon-MSR-V1.safetensors"
+    MSR_URL="https://huggingface.co/LiconStudio/LTX-2.3-Multiple-Subject-Reference/resolve/main/LTX-2.3-Licon-MSR-V1.safetensors"
+    if ! check_size "$MSR" 1000000; then
+      download_with_validation "$MSR" 1000000 "$MSR_URL" "MSR LoRA" || \
+        echo "worker-ltx-video: MSR LoRA indisponível (modo msr desabilitado)"
+    fi
   fi
 
   # Spatial Upscaler 2x (para pipeline de 2 estágios)

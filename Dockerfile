@@ -114,6 +114,18 @@ RUN cd /comfyui/custom_nodes && \
     cd ComfyUI-KJNodes && git checkout e27a505b3ba6ce42687fe00500deda103d9d6071 && \
     uv pip install --no-cache-dir -r requirements.txt
 
+# Licon-MSR (fork de liconstudio) — Multi-Subject Reference: N imagens SEPARADAS -> vídeo
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/danilo-afk/ComfyUI-Licon-MSR.git && \
+    cd ComfyUI-Licon-MSR && git checkout c9a34efd850c2e2e62d1eb17aeb4a3c7adc3e4c0 && \
+    uv pip install --no-cache-dir -r requirements.txt
+
+# PromptRelay (fork de kijai) — PromptRelayEncode (conditioning do workflow MSR)
+RUN cd /comfyui/custom_nodes && \
+    git clone https://github.com/danilo-afk/ComfyUI-PromptRelay.git && \
+    cd ComfyUI-PromptRelay && git checkout ca5d4e3edb6abd9c2a4c68a3a6798eec1980f450 && \
+    uv pip install --no-cache-dir -r requirements.txt
+
 # Compat: node utilitário usado em workflows oficiais LTX-2
 COPY src/custom_nodes/kiara_impact_compat /comfyui/custom_nodes/kiara_impact_compat
 # ==========================================
