@@ -99,7 +99,7 @@ RUN chmod +x /usr/local/bin/comfy-manager-set-mode
 # ComfyUI-LTXVideo (fork de Lightricks) — geração de vídeo LTX-2/2.3 + IC-LoRA
 RUN cd /comfyui/custom_nodes && \
     git clone https://github.com/danilo-afk/ComfyUI-LTXVideo.git && \
-    cd ComfyUI-LTXVideo && git checkout aceeae9635f6d493f2893ba3c411a1c36031788a && \
+    cd ComfyUI-LTXVideo && git checkout f5196f1b82e8351afd71727abc7dfdb78b604715 && \
     uv pip install --no-cache-dir -r requirements.txt
 
 # VideoHelperSuite (fork de Kosinkadink) — output de vídeo (VHS_VideoCombine)
