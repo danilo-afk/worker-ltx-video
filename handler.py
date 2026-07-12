@@ -486,6 +486,10 @@ _TEMPLATE_INJECT = {
     # DE REFERÊNCIA (personagens/props/cenário); dims na EmptyLTXVLatentVideo (3059).
     "iclora": {"file": "ltx23_iclora.json", "positive": "2483", "negative": "2612", "load_image": "2004",
                "length": "5072", "fps": 24, "preprocess": None, "empty_image": None, "empty_latent": "3059"},
+    # Caminho B (N imagens SEPARADAS): Multi-Subject Reference. Cada imagem = 1 sujeito
+    # (até 4) + 1 background; PromptRelayEncode conduz o prompt; dims em INTConstant.
+    "msr": {"file": "ltx23_msr.json", "prompt_relay": "99", "subjects": ["29", "40"], "background": "30",
+            "width": "43", "height": "44", "length": "50", "fps": 24},
 }
 
 # aspect_ratio (node) -> (W, H) na mesma classe de área (~921k px), múltiplos de 32.
@@ -572,6 +576,16 @@ def _fit_area(data_uri, target_area=None):
         return data_uri, None
 
 
+def _neutral_plate(w, h, rgb=(210, 205, 200)):
+    """Gera um plate de fundo neutro (data URI) p/ o background obrigatório do MSR.
+    O MSR compõe os sujeitos sobre esse plate; o prompt descreve a cena real."""
+    if Image is None:
+        return None
+    out = BytesIO()
+    Image.new("RGB", (max(32, w), max(32, h)), rgb).save(out, format="PNG")
+    return "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()
+
+
 def _compose_reference_sheet(images):
     """Compõe N imagens numa FOLHA de referência (grid) — a IC-LoRA condiciona por uma
     única folha composta. Grid ~quadrado (colunas = ceil(sqrt(N))). Sem PIL: usa a 1ª."""
@@ -625,6 +639,67 @@ def _url_to_data_uri(url):
     return f"data:{ct};base64," + base64.b64encode(resp.content).decode()
 
 
+# MSR degrada mais rápido que t2v/i2v em vídeos longos -> teto menor (~6.7s).
+_LTX_MSR_MAX_FRAMES = int(os.environ.get("LTX_MSR_MAX_FRAMES", "161") or 161)
+
+
+def _build_msr(job_input, inj, images, prompt):
+    """Monta o workflow MSR (N imagens separadas -> vídeo multi-sujeito).
+
+    Cada imagem = 1 sujeito (até len(subjects)); gera um plate de background neutro
+    (input obrigatório do LiconMSR); PromptRelayEncode conduz o prompt (global+local).
+    """
+    path = os.path.join(WORKFLOWS_DIR, inj["file"])
+    with open(path) as f:
+        wf = json.load(f)
+
+    # aspect_ratio -> dims (INTConstant width/height); default do template se ausente.
+    aspect = (job_input.get("aspect_ratio") or "").strip()
+    wh = _ASPECT_WH.get(aspect)
+    if wh and inj["width"] in wf and inj["height"] in wf:
+        wf[inj["width"]]["inputs"]["value"], wf[inj["height"]]["inputs"]["value"] = wh
+        print(f"worker-ltx-video - msr aspect {aspect} -> {wh[0]}x{wh[1]}")
+    w = wf[inj["width"]]["inputs"]["value"]
+    h = wf[inj["height"]]["inputs"]["value"]
+
+    # Sujeitos -> LoadImage nós (até os slots disponíveis); nomes canônicos.
+    subjects = inj["subjects"]
+    upload = []
+    for i, node in enumerate(subjects):
+        if i < len(images) and node in wf:
+            name = f"s{i + 1}.png"
+            wf[node]["inputs"]["image"] = name
+            upload.append({"name": name, "image": images[i]["image"]})
+    # Background obrigatório: plate neutro do tamanho do vídeo (a cena vem do prompt).
+    plate = _neutral_plate(w, h)
+    if plate and inj["background"] in wf:
+        wf[inj["background"]]["inputs"]["image"] = "bg.png"
+        upload.append({"name": "bg.png", "image": plate})
+
+    # PromptRelay: global (contexto/cena) + local (ação do segmento). Um prompt do node
+    # alimenta ambos (segmento único); local NÃO pode ser vazio (nó exige >=1).
+    pr = inj["prompt_relay"]
+    if prompt and pr in wf:
+        wf[pr]["inputs"]["global_prompt"] = prompt
+        wf[pr]["inputs"]["local_prompts"] = prompt
+    neg = job_input.get("negative_prompt")
+
+    # Duração -> length (INTConstant), teto menor p/ MSR.
+    fps = inj.get("fps") or 24
+    frames = None
+    if job_input.get("num_frames"):
+        frames = int(job_input["num_frames"])
+    elif job_input.get("duration") or job_input.get("duration_seconds"):
+        frames = round(float(job_input.get("duration") or job_input.get("duration_seconds")) * fps)
+    if frames and inj["length"] in wf:
+        snapped = _snap_frames(frames, _LTX_MSR_MAX_FRAMES)
+        wf[inj["length"]]["inputs"]["value"] = snapped
+        print(f"worker-ltx-video - msr duração: {frames}f -> {snapped}f (~{snapped / fps:.1f}s)")
+
+    print(f"worker-ltx-video - modo-prompt: msr | sujeitos={len(upload) - 1} | {w}x{h} | prompt={prompt[:60]!r}")
+    return wf, upload
+
+
 def build_workflow_from_prompt(job_input):
     """Modo-prompt: monta o workflow LTX a partir de {prompt, images/image_urls, params}.
 
@@ -647,15 +722,19 @@ def build_workflow_from_prompt(job_input):
     # Modo: `content_reference` (image_as_reference no node) + imagens -> IC-LoRA
     # (referência de conteúdo por FOLHA composta). Senão: 1+ img = i2v, 0 = t2v.
     if images and job_input.get("content_reference"):
-        kind = "iclora"
-        # A IC-LoRA condiciona por 1 folha de referência: N imagens -> compõe num grid.
-        if len(images) > 1:
-            images = [_compose_reference_sheet(images)]
+        # O node escolhe pelo tipo de input: 2+ imagens SEPARADAS -> MSR (multi-sujeito);
+        # 1 imagem -> IC-LoRA Ingredients (folha de referência única).
+        kind = "msr" if len(images) > 1 else "iclora"
     elif images:
         kind = "i2v"
     else:
         kind = "t2v"
     inj = _TEMPLATE_INJECT[kind]
+
+    # ===== MSR: N imagens separadas -> vídeo (fluxo próprio, nós distintos) =====
+    if kind == "msr":
+        return _build_msr(job_input, inj, images, prompt)
+    # ==========================================================================
     path = os.path.join(WORKFLOWS_DIR, inj["file"])
     with open(path) as f:
         wf = json.load(f)
