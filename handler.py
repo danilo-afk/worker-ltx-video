@@ -482,6 +482,10 @@ _TEMPLATE_INJECT = {
             "length": "92:62", "fps": 24, "preprocess": None, "empty_image": "92:89"},
     "i2v": {"file": "ltx23_i2v.json", "positive": "153:132", "negative": "153:123", "load_image": "153:124",
             "length": "153:125", "fps": 24, "preprocess": "i2v:preprocess", "empty_image": None},
+    # Caminho B: referência de conteúdo (IC-LoRA Ingredients) — a imagem é uma FOLHA
+    # DE REFERÊNCIA (personagens/props/cenário); dims na EmptyLTXVLatentVideo (3059).
+    "iclora": {"file": "ltx23_iclora.json", "positive": "2483", "negative": "2612", "load_image": "2004",
+               "length": "5072", "fps": 24, "preprocess": None, "empty_image": None, "empty_latent": "3059"},
 }
 
 # aspect_ratio (node) -> (W, H) na mesma classe de área (~921k px), múltiplos de 32.
@@ -545,6 +549,60 @@ def _cap_longside(data_uri, cap):
         print(f"worker-ltx-video - cap_longside falhou ({e}); usando imagem original")
         return data_uri
 
+
+def _fit_area(data_uri, target_area=None):
+    """Redimensiona a imagem p/ ~`target_area` px PRESERVANDO o aspecto, dims múltiplas
+    de 32 (exigência do latente LTX). Retorna (data_uri, (w,h)). Sem PIL: devolve (orig, None)."""
+    target_area = target_area or int(os.environ.get("LTX_ICLORA_AREA", str(768 * 768)))
+    if Image is None:
+        return data_uri, None
+    try:
+        b64 = data_uri.split(",", 1)[1] if data_uri.startswith("data:") else data_uri
+        im = Image.open(BytesIO(base64.b64decode(b64))).convert("RGB")
+        sw, sh = im.size
+        scale = (target_area / (sw * sh)) ** 0.5
+        nw = max(32, (round(sw * scale) // 32) * 32)
+        nh = max(32, (round(sh * scale) // 32) * 32)
+        im = im.resize((nw, nh), Image.LANCZOS)
+        out = BytesIO()
+        im.save(out, format="PNG")
+        return "data:image/png;base64," + base64.b64encode(out.getvalue()).decode(), (nw, nh)
+    except Exception as e:
+        print(f"worker-ltx-video - fit_area falhou ({e})")
+        return data_uri, None
+
+
+def _compose_reference_sheet(images):
+    """Compõe N imagens numa FOLHA de referência (grid) — a IC-LoRA condiciona por uma
+    única folha composta. Grid ~quadrado (colunas = ceil(sqrt(N))). Sem PIL: usa a 1ª."""
+    if Image is None or len(images) <= 1:
+        return images[0]
+    try:
+        import math
+
+        ims = []
+        for it in images:
+            d = it["image"]
+            b64 = d.split(",", 1)[1] if d.startswith("data:") else d
+            ims.append(Image.open(BytesIO(base64.b64decode(b64))).convert("RGB"))
+        cols = math.ceil(len(ims) ** 0.5)
+        rows = math.ceil(len(ims) / cols)
+        cell = 512
+        sheet = Image.new("RGB", (cols * cell, rows * cell), (0, 0, 0))
+        for i, im in enumerate(ims):
+            im2 = im.copy()
+            im2.thumbnail((cell, cell), Image.LANCZOS)
+            x = (i % cols) * cell + (cell - im2.width) // 2
+            y = (i // cols) * cell + (cell - im2.height) // 2
+            sheet.paste(im2, (x, y))
+        out = BytesIO()
+        sheet.save(out, format="PNG")
+        print(f"worker-ltx-video - reference sheet: {len(ims)} imagens -> grid {cols}x{rows}")
+        return {"name": "ref.png", "image": "data:image/png;base64," + base64.b64encode(out.getvalue()).decode()}
+    except Exception as e:
+        print(f"worker-ltx-video - compose_reference_sheet falhou ({e}); usando 1ª imagem")
+        return images[0]
+
 # LTX exige nº de frames no formato 8n+1. Teto p/ caber na VRAM (RTX 4090 24GB, 22B
 # + upscaler 2-stage). Override por env LTX_MAX_FRAMES (0 = sem teto).
 _LTX_MAX_FRAMES = int(os.environ.get("LTX_MAX_FRAMES", "241") or 241)
@@ -586,7 +644,17 @@ def build_workflow_from_prompt(job_input):
             continue
         images.append({"name": f"ref_{i}.png", "image": _url_to_data_uri(u)})
 
-    kind = "i2v" if images else "t2v"
+    # Modo: `content_reference` (image_as_reference no node) + imagens -> IC-LoRA
+    # (referência de conteúdo por FOLHA composta). Senão: 1+ img = i2v, 0 = t2v.
+    if images and job_input.get("content_reference"):
+        kind = "iclora"
+        # A IC-LoRA condiciona por 1 folha de referência: N imagens -> compõe num grid.
+        if len(images) > 1:
+            images = [_compose_reference_sheet(images)]
+    elif images:
+        kind = "i2v"
+    else:
+        kind = "t2v"
     inj = _TEMPLATE_INJECT[kind]
     path = os.path.join(WORKFLOWS_DIR, inj["file"])
     with open(path) as f:
@@ -597,6 +665,16 @@ def build_workflow_from_prompt(job_input):
     neg = job_input.get("negative_prompt")
     if neg and inj["negative"] in wf:
         wf[inj["negative"]]["inputs"]["text"] = neg
+    # IC-LoRA: a resolução do vídeo deriva da FOLHA de referência PRESERVANDO o aspecto
+    # (como no workflow proven; sem isso, quadrado forçado distorce). Resize p/ ~área alvo
+    # (múltiplo de 32) e casa o latente (3059) com essas dims.
+    if kind == "iclora" and images and inj.get("empty_latent") in wf:
+        images[0]["image"], dims = _fit_area(images[0]["image"])
+        if dims:
+            wf[inj["empty_latent"]]["inputs"]["width"] = dims[0]
+            wf[inj["empty_latent"]]["inputs"]["height"] = dims[1]
+            print(f"worker-ltx-video - iclora: ref sheet {dims[0]}x{dims[1]} (aspecto preservado)")
+
     # Aspect_ratio do node -> resolução (t2v: EmptyImage; i2v: resize cover da imagem).
     aspect = (job_input.get("aspect_ratio") or "").strip()
     wh = _ASPECT_WH.get(aspect)
