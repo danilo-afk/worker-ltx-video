@@ -409,8 +409,8 @@ def _attempt_websocket_reconnect(ws_url, max_attempts, delay_s, initial_error):
 _MSR_TRIM_FRAMES = int(os.environ.get("LTX_MSR_TRIM_FRAMES", "24") or 24)
 
 
-def _trim_leading_frames(video_bytes, filename, n_frames, fps=50):
-    """Remove os primeiros `n_frames` do vídeo (via ffmpeg, corte por tempo)."""
+def _trim_leading_frames(video_bytes, filename, n_frames):
+    """Remove os primeiros `n_frames` do vídeo (frame-exato, independente de fps)."""
     if n_frames <= 0:
         return video_bytes
     src = dst = None
@@ -419,10 +419,9 @@ def _trim_leading_frames(video_bytes, filename, n_frames, fps=50):
         dst = os.path.join(tempfile.gettempdir(), f"trout_{uuid.uuid4().hex}.mp4")
         with open(src, "wb") as f:
             f.write(video_bytes)
-        ss = n_frames / float(fps or 50)
         r = subprocess.run(
-            ["ffmpeg", "-ss", f"{ss:.4f}", "-i", src, "-c:v", "libx264", "-preset",
-             "fast", "-crf", "20", "-an", "-y", dst],
+            ["ffmpeg", "-i", src, "-vf", f"select='gte(n\\,{n_frames})',setpts=N/FRAME_RATE/TB",
+             "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-an", "-y", dst],
             capture_output=True, timeout=300,
         )
         if r.returncode != 0:
@@ -527,7 +526,7 @@ _TEMPLATE_INJECT = {
     # Caminho B (N imagens SEPARADAS): Multi-Subject Reference. Cada imagem = 1 sujeito
     # (até 4) + 1 background; PromptRelayEncode conduz o prompt; dims em INTConstant.
     "msr": {"file": "ltx23_msr.json", "prompt_relay": "99", "subjects": ["29", "40"], "background": "30",
-            "width": "43", "height": "44", "length": "50", "fps": 50},
+            "width": "43", "height": "44", "length": "50", "fps": 25},
 }
 
 # aspect_ratio (node) -> (W, H) na mesma classe de área (~921k px), múltiplos de 32.
