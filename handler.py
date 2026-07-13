@@ -526,7 +526,7 @@ _TEMPLATE_INJECT = {
     # Caminho B (N imagens SEPARADAS): Multi-Subject Reference. Cada imagem = 1 sujeito
     # (até 4) + 1 background; PromptRelayEncode conduz o prompt; dims em INTConstant.
     "msr": {"file": "ltx23_msr.json", "prompt_relay": "99", "subjects": ["29", "40"], "background": "30",
-            "width": "43", "height": "44", "length": "50", "fps": 25},
+            "width": "43", "height": "44", "length": "50", "fps": 33},
 }
 
 # aspect_ratio (node) -> (W, H) na mesma classe de área (~921k px), múltiplos de 32.
@@ -1387,6 +1387,16 @@ def handler(job):
 
                     image_bytes = get_file_data(filename, subfolder, img_type)
                     if image_bytes:
+                        # SaveVideo expõe o mp4 sob "images". MSR: corta a folha de
+                        # referência que sangra nos 1ºs frames (trim frame-exato).
+                        if filename.lower().endswith((".mp4", ".webm", ".mov")) and (
+                            isinstance(workflow, dict)
+                            and any(
+                                isinstance(n, dict) and n.get("class_type") == "LiconMSR"
+                                for n in workflow.values()
+                            )
+                        ):
+                            image_bytes = _trim_leading_frames(image_bytes, filename, _MSR_TRIM_FRAMES)
                         if os.environ.get("BUCKET_ENDPOINT_URL"):
                             try:
                                 file_ext = os.path.splitext(filename)[1] or ".png"
