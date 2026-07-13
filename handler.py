@@ -526,7 +526,7 @@ _TEMPLATE_INJECT = {
     # Caminho B (N imagens SEPARADAS): Multi-Subject Reference. Cada imagem = 1 sujeito
     # (até 4) + 1 background; PromptRelayEncode conduz o prompt; dims em INTConstant.
     "msr": {"file": "ltx23_msr.json", "prompt_relay": "99", "subjects": ["29", "40"], "background": "30",
-            "width": "43", "height": "44", "length": "50", "fps": 33},
+            "width": "43", "height": "44", "length": "50", "fps": 30},
 }
 
 # aspect_ratio (node) -> (W, H) na mesma classe de área (~921k px), múltiplos de 32.
