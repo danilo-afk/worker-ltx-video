@@ -48,7 +48,7 @@
  "3": {
   "class_type": "LowVRAMCheckpointLoader",
   "inputs": {
-   "ckpt_name": "ltx-2.3-22b-distilled-1.1.safetensors"
+   "ckpt_name": "ltx-2.3-22b-dev-fp8.safetensors"
   }
  },
  "24": {
@@ -241,7 +241,7 @@
   "class_type": "LTXAVTextEncoderLoader",
   "inputs": {
    "text_encoder": "gemma_3_12B_it.safetensors",
-   "ckpt_name": "ltx-2.3-22b-distilled-1.1.safetensors",
+   "ckpt_name": "ltx-2.3-22b-dev-fp8.safetensors",
    "device": "default"
   }
  },
@@ -277,7 +277,7 @@
   "class_type": "LTXICLoRALoaderModelOnly",
   "inputs": {
    "model": [
-    "3",
+    "501",
     0
    ],
    "lora_name": "LTX-2.3-Licon-MSR-V1.safetensors",
@@ -317,7 +317,7 @@
     "25",
     0
    ],
-   "fps": 24
+   "fps": 50
   }
  },
  "7": {
@@ -384,6 +384,28 @@
    "local_prompts": "",
    "segment_lengths": "",
    "epsilon": 0.0022
+  }
+ },
+ "500": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "model": [
+    "3",
+    0
+   ],
+   "lora_name": "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+   "strength_model": 0.5
+  }
+ },
+ "501": {
+  "class_type": "LoraLoaderModelOnly",
+  "inputs": {
+   "model": [
+    "500",
+    0
+   ],
+   "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
+   "strength_model": 1.0
   }
  }
 }

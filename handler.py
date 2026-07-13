@@ -489,7 +489,7 @@ _TEMPLATE_INJECT = {
     # Caminho B (N imagens SEPARADAS): Multi-Subject Reference. Cada imagem = 1 sujeito
     # (até 4) + 1 background; PromptRelayEncode conduz o prompt; dims em INTConstant.
     "msr": {"file": "ltx23_msr.json", "prompt_relay": "99", "subjects": ["29", "40"], "background": "30",
-            "width": "43", "height": "44", "length": "50", "fps": 24},
+            "width": "43", "height": "44", "length": "50", "fps": 50},
 }
 
 # aspect_ratio (node) -> (W, H) na mesma classe de área (~921k px), múltiplos de 32.
@@ -639,8 +639,9 @@ def _url_to_data_uri(url):
     return f"data:{ct};base64," + base64.b64encode(resp.content).decode()
 
 
-# MSR degrada mais rápido que t2v/i2v em vídeos longos -> teto menor (~6.7s).
-_LTX_MSR_MAX_FRAMES = int(os.environ.get("LTX_MSR_MAX_FRAMES", "161") or 161)
+# MSR roda a 50fps (coerência de movimento). Teto de frames p/ caber em VRAM/tempo
+# (~4s @ 50fps; clipes MSR são curtos por natureza, estilo "clip a clip" do tutorial).
+_LTX_MSR_MAX_FRAMES = int(os.environ.get("LTX_MSR_MAX_FRAMES", "201") or 201)
 
 
 def _build_msr(job_input, inj, images, prompt):
