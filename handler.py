@@ -403,6 +403,44 @@ def _attempt_websocket_reconnect(ws_url, max_attempts, delay_s, initial_error):
     )
 
 
+# MSR: o guide/IC-LoRA deixa a FOLHA de referência (sujeitos lado a lado) "sangrar"
+# nos primeiros frames de conteúdo (LTXVCropGuides só corta o latente extra, não o
+# bleed). Cortamos esses frames iniciais da saída. Compensado no length do _build_msr.
+_MSR_TRIM_FRAMES = int(os.environ.get("LTX_MSR_TRIM_FRAMES", "24") or 24)
+
+
+def _trim_leading_frames(video_bytes, filename, n_frames, fps=50):
+    """Remove os primeiros `n_frames` do vídeo (via ffmpeg, corte por tempo)."""
+    if n_frames <= 0:
+        return video_bytes
+    src = dst = None
+    try:
+        src = os.path.join(tempfile.gettempdir(), f"trin_{uuid.uuid4().hex}.mp4")
+        dst = os.path.join(tempfile.gettempdir(), f"trout_{uuid.uuid4().hex}.mp4")
+        with open(src, "wb") as f:
+            f.write(video_bytes)
+        ss = n_frames / float(fps or 50)
+        r = subprocess.run(
+            ["ffmpeg", "-ss", f"{ss:.4f}", "-i", src, "-c:v", "libx264", "-preset",
+             "fast", "-crf", "20", "-an", "-y", dst],
+            capture_output=True, timeout=300,
+        )
+        if r.returncode != 0:
+            print(f"worker-ltx-video - trim ffmpeg error: {r.stderr.decode()[:300]}")
+            return video_bytes
+        with open(dst, "rb") as f:
+            out = f.read()
+        print(f"worker-ltx-video - msr: cortados {n_frames}f iniciais (folha de referência)")
+        return out
+    except Exception as e:
+        print(f"worker-ltx-video - trim falhou: {e}")
+        return video_bytes
+    finally:
+        for p in (src, dst):
+            if p and os.path.exists(p):
+                os.remove(p)
+
+
 def convert_video_to_mp4(video_bytes, filename):
     """Converte vídeo para MP4 via ffmpeg se necessário."""
     ext = os.path.splitext(filename)[1].lower()
@@ -641,7 +679,7 @@ def _url_to_data_uri(url):
 
 # MSR roda a 50fps (coerência de movimento). Teto de frames p/ caber em VRAM/tempo
 # (~4s @ 50fps; clipes MSR são curtos por natureza, estilo "clip a clip" do tutorial).
-_LTX_MSR_MAX_FRAMES = int(os.environ.get("LTX_MSR_MAX_FRAMES", "201") or 201)
+_LTX_MSR_MAX_FRAMES = int(os.environ.get("LTX_MSR_MAX_FRAMES", "249") or 249)
 
 
 def _build_msr(job_input, inj, images, prompt):
@@ -692,10 +730,16 @@ def _build_msr(job_input, inj, images, prompt):
             f"exactly {_num} together in the same single frame, one shared scene, "
             f"one continuous cinematic shot, no extra people. {prompt}"
         )
-        wf[pr]["inputs"]["local_prompts"] = prompt
+        # local = ação do segmento: injeta pistas de MOVIMENTO (senão o MSR trava os
+        # sujeitos = movimento "robótico"). Descreve corpo + câmera, não só a cena.
+        wf[pr]["inputs"]["local_prompts"] = (
+            f"{prompt}. natural fluid body movement, subtle gestures and head turns "
+            "while talking, weight shifting, smooth cinematic camera motion, lifelike dynamics"
+        )
     neg = job_input.get("negative_prompt")
 
-    # Duração -> length (INTConstant), teto menor p/ MSR.
+    # Duração -> length (INTConstant), teto menor p/ MSR. +trim: gera frames extras p/
+    # o corte da folha (início) não encurtar a duração pedida.
     fps = inj.get("fps") or 24
     frames = None
     if job_input.get("num_frames"):
@@ -703,9 +747,9 @@ def _build_msr(job_input, inj, images, prompt):
     elif job_input.get("duration") or job_input.get("duration_seconds"):
         frames = round(float(job_input.get("duration") or job_input.get("duration_seconds")) * fps)
     if frames and inj["length"] in wf:
-        snapped = _snap_frames(frames, _LTX_MSR_MAX_FRAMES)
+        snapped = _snap_frames(frames + _MSR_TRIM_FRAMES, _LTX_MSR_MAX_FRAMES)
         wf[inj["length"]]["inputs"]["value"] = snapped
-        print(f"worker-ltx-video - msr duração: {frames}f -> {snapped}f (~{snapped / fps:.1f}s)")
+        print(f"worker-ltx-video - msr duração: {frames}f +{_MSR_TRIM_FRAMES}trim -> {snapped}f")
 
     print(f"worker-ltx-video - modo-prompt: msr | sujeitos={len(upload) - 1} | {w}x{h} | prompt={prompt[:60]!r}")
     return wf, upload
@@ -1396,6 +1440,12 @@ def handler(job):
                     vid_bytes = get_file_data(filename, subfolder, vid_type)
                     if vid_bytes:
                         vid_bytes, filename = convert_video_to_mp4(vid_bytes, filename)
+                        # MSR: corta a folha de referência que sangra nos 1ºs frames.
+                        if isinstance(workflow, dict) and any(
+                            isinstance(n, dict) and n.get("class_type") == "LiconMSR"
+                            for n in workflow.values()
+                        ):
+                            vid_bytes = _trim_leading_frames(vid_bytes, filename, _MSR_TRIM_FRAMES)
                         try:
                             uploaded_url = upload_binary_artifact(job_id, vid_bytes, filename, ".mp4")
                             print(
