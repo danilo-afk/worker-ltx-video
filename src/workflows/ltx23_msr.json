@@ -277,7 +277,7 @@
   "class_type": "LTXICLoRALoaderModelOnly",
   "inputs": {
    "model": [
-    "501",
+    "500",
     0
    ],
    "lora_name": "LTX-2.3-Licon-MSR-V1.safetensors",
@@ -395,17 +395,6 @@
    ],
    "lora_name": "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
    "strength_model": 0.5
-  }
- },
- "501": {
-  "class_type": "LoraLoaderModelOnly",
-  "inputs": {
-   "model": [
-    "500",
-    0
-   ],
-   "lora_name": "LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors",
-   "strength_model": 1.0
   }
  }
 }

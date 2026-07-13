@@ -418,16 +418,8 @@ PPEOF
       download_with_validation "$MSR" 1000000 "$MSR_URL" "MSR LoRA" || \
         echo "worker-ltx-video: MSR LoRA indisponível (modo msr desabilitado)"
     fi
-
-    # OmniNFT RL LoRA (zghhui, ~617MB bf16 via Kijai). RL de coerência de movimento /
-    # estabilidade temporal — 3º LoRA do stack MSR (dev + distill-384 + OmniNFT + MSR)
-    # que dá qualidade nítida (sem ela: motion blur/distorção nos 2 sujeitos).
-    OMNI="$VOLUME/models/loras/LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors"
-    OMNI_URL="https://huggingface.co/Kijai/LTX2.3_comfy/resolve/main/loras/LTX-2.3-OmniNFT-RL-Lora_bf16.safetensors"
-    if ! check_size "$OMNI" 1000000; then
-      download_with_validation "$OMNI" 1000000 "$OMNI_URL" "OmniNFT RL LoRA" || \
-        echo "worker-ltx-video: OmniNFT LoRA indisponível (qualidade MSR reduzida)"
-    fi
+    # Nota: OmniNFT RL LoRA testada e DESCARTADA — ao empilhar (@1.0) lavou/borrou os
+    # sujeitos (pitfall "too many LoRAs"). Stack final = dev-fp8 + distill-384@0.5 + MSR.
   fi
 
   # Spatial Upscaler 2x (para pipeline de 2 estágios)
